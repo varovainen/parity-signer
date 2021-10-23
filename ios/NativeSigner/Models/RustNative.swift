@@ -67,6 +67,12 @@ class SignerDataModel: ObservableObject {
     let queue = DispatchQueue.global(qos: .background)
     @Published var alert: Bool = false
     
+    //Self-signing stuff
+    @Published var metadataVersion: String = ""
+    @Published var metadataName: String = ""
+    @Published var allKeys: [Allkey] = []
+    @Published var ssSign: UIImage = UIImage()
+    
     init() {
         self.dbName = NSHomeDirectory() + "/Documents/Database"
         self.onboardingDone = FileManager.default.fileExists(atPath: NSHomeDirectory() + "/Documents/Database")

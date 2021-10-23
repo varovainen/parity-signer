@@ -79,6 +79,9 @@
 		2DB037D12721D31600A318B2 /* FooterBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB037D02721D31600A318B2 /* FooterBlock.swift */; };
 		2DB037D32721DBF900A318B2 /* TCNewSpecs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB037D22721DBF800A318B2 /* TCNewSpecs.swift */; };
 		2DB037D52721DF8800A318B2 /* TCVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB037D42721DF8800A318B2 /* TCVerifier.swift */; };
+		2DB037D7272497F300A318B2 /* SelfSigning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB037D6272497F300A318B2 /* SelfSigning.swift */; };
+		2DB037D92724A55600A318B2 /* AllKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB037D82724A55500A318B2 /* AllKeys.swift */; };
+		2DB037DB2724AAEF00A318B2 /* SSQR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB037DA2724AAEF00A318B2 /* SSQR.swift */; };
 		2DE72BC226A588C7002BB752 /* NativeSignerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DE72BC126A588C7002BB752 /* NativeSignerApp.swift */; };
 		2DE72BC426A588C7002BB752 /* MainScreenContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DE72BC326A588C7002BB752 /* MainScreenContainer.swift */; };
 		2DE72BC626A588C9002BB752 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2DE72BC526A588C9002BB752 /* Assets.xcassets */; };
@@ -188,6 +191,9 @@
 		2DB037D02721D31600A318B2 /* FooterBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FooterBlock.swift; sourceTree = "<group>"; };
 		2DB037D22721DBF800A318B2 /* TCNewSpecs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TCNewSpecs.swift; sourceTree = "<group>"; };
 		2DB037D42721DF8800A318B2 /* TCVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TCVerifier.swift; sourceTree = "<group>"; };
+		2DB037D6272497F300A318B2 /* SelfSigning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfSigning.swift; sourceTree = "<group>"; };
+		2DB037D82724A55500A318B2 /* AllKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllKeys.swift; sourceTree = "<group>"; };
+		2DB037DA2724AAEF00A318B2 /* SSQR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSQR.swift; sourceTree = "<group>"; };
 		2DE72BBE26A588C7002BB752 /* NativeSigner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NativeSigner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2DE72BC126A588C7002BB752 /* NativeSignerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSignerApp.swift; sourceTree = "<group>"; };
 		2DE72BC326A588C7002BB752 /* MainScreenContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainScreenContainer.swift; sourceTree = "<group>"; };
@@ -278,9 +284,11 @@
 				2D7A7BEC26C50AB80053C1E0 /* NetworkManager.swift */,
 				2DB037C42716CDAF00A318B2 /* NetworkDetails.swift */,
 				2D7A7BEE26C50ACB0053C1E0 /* SeedManager.swift */,
+				2DB037DA2724AAEF00A318B2 /* SSQR.swift */,
 				2D7A7BCB26BAD02A0053C1E0 /* ExportAddress.swift */,
 				2D7A7BB526B136970053C1E0 /* NewSeedScreen.swift */,
 				2D7A7BD726C163110053C1E0 /* TransactionPreview.swift */,
+				2DB037D82724A55500A318B2 /* AllKeys.swift */,
 				2D7A7BDD26C296AA0053C1E0 /* TransactionReady.swift */,
 				2D7A7BC326BA8B350053C1E0 /* NewAddressScreen.swift */,
 				2DE72C1026AAC3D6002BB752 /* LandingView.swift */,
@@ -439,6 +447,7 @@
 				2D7A7BBF26B97DB30053C1E0 /* Address.swift */,
 				2DE72BF026A59834002BB752 /* Network.swift */,
 				2DE72C0E26A99885002BB752 /* RustNative.swift */,
+				2DB037D6272497F300A318B2 /* SelfSigning.swift */,
 				2D7A7BF426C58E9E0053C1E0 /* History.swift */,
 				2D7A7BE426C3FE260053C1E0 /* Documents.swift */,
 				2D7A7BCF26BBC72D0053C1E0 /* Transaction.swift */,
@@ -637,6 +646,7 @@
 				2D7A7C1626CB96840053C1E0 /* TCWarning.swift in Sources */,
 				2DB037C32715BD1100A318B2 /* MultiselectBottomControl.swift in Sources */,
 				2D7A7BED26C50AB80053C1E0 /* NetworkManager.swift in Sources */,
+				2DB037D7272497F300A318B2 /* SelfSigning.swift in Sources */,
 				2DE72BF726A5AC68002BB752 /* KeyManager.swift in Sources */,
 				2D7A7BA526AE9E680053C1E0 /* Footer.swift in Sources */,
 				2D7A7BDC26C2613F0053C1E0 /* TransactionCardView.swift in Sources */,
@@ -667,10 +677,12 @@
 				2DB037C72717094B00A318B2 /* ModalBackdrop.swift in Sources */,
 				2D7A7BEB26C4149E0053C1E0 /* DocumentModal.swift in Sources */,
 				2DE72C0F26A99885002BB752 /* RustNative.swift in Sources */,
+				2DB037DB2724AAEF00A318B2 /* SSQR.swift in Sources */,
 				2D7A7C0026CA97B00053C1E0 /* TCAuthor.swift in Sources */,
 				2D7A7BFD26C675D30053C1E0 /* HistoryCard.swift in Sources */,
 				2DE72BF126A59834002BB752 /* Network.swift in Sources */,
 				2D72B4F626EF3BC50081E879 /* Navigator.swift in Sources */,
+				2DB037D92724A55600A318B2 /* AllKeys.swift in Sources */,
 				2D0D5E7E26F0B1D900B0EF9D /* DeleteKeyConfirm.swift in Sources */,
 				2DB037D12721D31600A318B2 /* FooterBlock.swift in Sources */,
 				2D7A7BC426BA8B350053C1E0 /* NewAddressScreen.swift in Sources */,

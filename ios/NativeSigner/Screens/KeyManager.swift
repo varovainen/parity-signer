@@ -68,6 +68,10 @@ struct KeyManager: View {
                 NetworkDetails()
             case .none:
                 EmptyView()
+            case .allKeys:
+                AllKeys()
+            case .showSSQr:
+                SSQR()
             }
         }
         .background(/*@START_MENU_TOKEN@*//*@PLACEHOLDER=View@*/Color("backgroundColor")/*@END_MENU_TOKEN@*/)

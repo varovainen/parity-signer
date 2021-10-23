@@ -88,7 +88,6 @@ extension SignerDataModel {
                 print("keysJSON corrupted")
             }
             signer_destroy_string(res!)
-            print("success1")
         } else {
             self.lastError = String(cString: err_ptr.pointee.message)
             print("Rust returned error")

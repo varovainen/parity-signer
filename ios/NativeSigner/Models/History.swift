@@ -200,8 +200,6 @@ extension SignerDataModel {
                     signer_destroy_string(res!)
                     return
                 }
-                print(self.history)
-                print(String(cString: res!))
                 self.history = history.sorted(by: {$0.order > $1.order})
             } else {
                 print("keysJSON corrupted")

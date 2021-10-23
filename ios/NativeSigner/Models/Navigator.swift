@@ -44,6 +44,8 @@ enum KeyManagerModal: Equatable {
     case seedSelector
     case networkManager
     case networkDetails
+    case allKeys
+    case showSSQr
 }
 
 /**

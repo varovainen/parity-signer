@@ -69,6 +69,14 @@ struct NetworkDetails: View {
                         ForEach(data.networkSettings?.meta ?? [], id: \.meta_hash) {
                             metaEntry in
                             MetadataCard(meta: metaEntry)
+                                .gesture(
+                                    LongPressGesture().onEnded{_ in
+                                        data.getAllKeys()
+                                        data.metadataVersion = metaEntry.spec_version
+                                        data.metadataName = data.networkSettings!.name
+                                        data.keyManagerModal = .allKeys
+                                    }
+                                )
                         }
                     }
                 }

@@ -13,8 +13,10 @@ struct QRView: View {
     }
 }
 
+/*
 struct QRView_Previews: PreviewProvider {
     static var previews: some View {
         QRView()
     }
 }
+*/

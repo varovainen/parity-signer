@@ -150,7 +150,7 @@ const char * get_general_certificate(struct ExternError*, const char* dbname);
 //Functions for self-signed upgrades
 const char * sign_load_types(struct ExternError*, const char* public_key, const char* encryption, const char* seed_phrase, const char* password, const char* dbname);
 
-const char * sign_load_metadata(struct ExternError*, const char* network, const char* version, const char* public_key, const char* encryption, const char* seed_phrase, const char* password, const char* dbname);
+const char * sign_load_metadata(struct ExternError*, const char* network, int version, const char* public_key, const char* encryption, const char* seed_phrase, const char* password, const char* dbname);
 
 const char * sign_load_specs(struct ExternError*, const char* network, const char* public_key, const char* encryption, const char* seed_phrase, const char* password, const char* dbname);
 
