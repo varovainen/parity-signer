@@ -134,7 +134,7 @@ impl AddressKey {
 pub fn print_multisigner_as_base58 (multi_signer: &MultiSigner, optional_prefix: Option<u16>) -> String {
     match optional_prefix {
         Some(base58prefix) => {
-            let version_for_base58 = Ss58AddressFormat::Custom(base58prefix);
+            let version_for_base58 = Ss58AddressFormat::custom(base58prefix);
             match multi_signer {
                 MultiSigner::Ed25519(pubkey) => pubkey.to_ss58check_with_version(version_for_base58),
                 MultiSigner::Sr25519(pubkey) => pubkey.to_ss58check_with_version(version_for_base58),
