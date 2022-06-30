@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["AddressDetails","Address key associated non-secret information stored in Signer database"]]});

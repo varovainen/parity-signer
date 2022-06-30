@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["full_run","Process incoming command as interpreted by parser."]],"mod":[["fetch_metadata","Fetch network information from a node using rpc calls"],["helpers","Helpers"],["interpret_specs","Fit network properties fetched via rpc call into data in expected format"],["parser","Command line parser for the client"]]});

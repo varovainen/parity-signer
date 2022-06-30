@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["DangerRecord","Danger status in the Signer database"]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["TokenFetch","Accepted token from `system_properties` rpc call"]],"fn":[["check_specs","Get from `system_properties` rpc call results the network data to be compared with already known data."],["interpret_properties","Transform `system_properties` rpc call results into [`NetworkProperties`]."]]});

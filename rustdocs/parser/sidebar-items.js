@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["MetadataBundle",""]],"fn":[["cut_method_extensions",""],["parse_and_display_set",""],["parse_extensions",""],["parse_method","Function intakes SCALE encoded method part of transaction as Vec, network metadata and network specs."],["parse_set",""]],"mod":[["cards",""],["decoding_commons",""],["method",""]]});

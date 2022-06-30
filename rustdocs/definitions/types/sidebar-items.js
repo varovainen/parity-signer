@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Description","Type description"],["EnumVariantType","Types of enum variants"]],"struct":[["EnumVariant","Enum variant description"],["StructField","Struct field description"],["TypeEntry","Information each type has to have: type name and description"]]});
