@@ -147,7 +147,7 @@ pub fn process_qr_image(image: &GrayImage, decoding: InProgress) -> anyhow::Resu
 
     match codes.last() {
         Some(Ok(code)) => match code.decode() {
-            Ok(decoded) => process_decoded_payload(decoded.payload, decoding),
+            Ok(mut decoded) => process_decoded_payload(&mut decoded.payload, decoding),
             Err(_) => Ok(Ready::NotYet(decoding)),
         },
         Some(_) => Ok(Ready::NotYet(decoding)),

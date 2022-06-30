@@ -2,8 +2,9 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use anyhow::anyhow;
-
 use std::convert::TryInto;
+
+use constants::{FOUNTAIN_LIMIT, FOUNTAIN_MARKER};
 
 pub mod process_payload;
 use process_payload::{process_decoded_payload, InProgress, Ready};
@@ -59,8 +60,11 @@ pub fn get_payload(line: &str, cleaned: bool) -> anyhow::Result<Vec<u8>> {
 
 pub fn get_length(line: &str, cleaned: bool) -> anyhow::Result<u32> {
     let payload = get_payload(line, cleaned)?;
-    if payload[0] & 0b10000000 > 0 {
-        //        println!("dealing with element of fountain qr");
+    let first_byte = match payload.get(0) {
+        Some(a) => *a,
+        None => return Err(anyhow!("Empty payload.")),
+    };
+    if first_byte & FOUNTAIN_MARKER > 0 {
         // Decoding algorithm is probabilistic, see documentation of the raptorq crate
         // Rephrasing from there, the probability to decode message with h
         // additional packets is 1 - 1/256^(h+1).
@@ -69,24 +73,30 @@ pub fn get_length(line: &str, cleaned: bool) -> anyhow::Result<u32> {
         // If one additional packet is added, it is ~ 0.99998.
         // It was decided to add one additional packet in the printed estimate, so that
         // the user expectations are lower.
-        let length_piece: [u8; 4] = payload[..4]
-            .to_vec()
-            .try_into()
-            .expect("constant vector slice size, always fits");
-        let length = u32::from_be_bytes(length_piece) - 0x80000000;
+        let length_piece: [u8; 4] = match payload.get(..4) {
+            Some(a) => a.try_into()
+                        .expect("constant vector slice size, always fits"),
+            None => return Err(anyhow!("Frame 0x{} appears to be a fountain QR code frame, but is too short to get expected payload length.", hex::encode(payload)))
+        };
+        let length = u32::from_be_bytes(length_piece) - FOUNTAIN_LIMIT;
         let new_packet = payload[4..].to_vec();
+        if new_packet.is_empty() {
+            return Err(anyhow!(
+                "Frame 0x{} appears to be a fountain QR code frame with empty associated packet.",
+                hex::encode(payload)
+            ));
+        }
         let number_of_messages = length / (new_packet.len() as u32) + 1;
         Ok(number_of_messages)
-    } else if payload.starts_with(&[0]) {
-        //            println!("dealing with element of legacy dynamic multi-element qr");
-        let number_of_messages_piece: [u8; 2] = payload[1..3]
-            .to_vec()
-            .try_into()
-            .expect("constant vector slice size, always fits");
+    } else if first_byte == 0 {
+        let number_of_messages_piece: [u8; 2] = match payload.get(1..3) {
+            Some(a) => a.try_into()
+                        .expect("constant vector slice size, always fits"),
+            None => return Err(anyhow!("Frame 0x{} appears to be a legacy multiframe QR code part, but is too short to get expected number of frames.", hex::encode(payload)))
+        };
         let number_of_messages = u16::from_be_bytes(number_of_messages_piece);
         Ok(number_of_messages as u32)
     } else {
-        //            println!("dealing with static qr");
         Ok(1)
     }
 }
@@ -99,9 +109,9 @@ pub fn decode_sequence(jsonline: &str, cleaned: bool) -> anyhow::Result<String> 
     let mut out = Ready::NotYet(InProgress::None);
     let mut final_result: Option<String> = None;
     for x in set.iter() {
-        let payload = get_payload(x, cleaned)?;
+        let mut payload = get_payload(x, cleaned)?;
         if let Ready::NotYet(decoding) = out {
-            out = process_decoded_payload(payload, decoding)?;
+            out = process_decoded_payload(&mut payload, decoding)?;
             if let Ready::Yes(v) = out {
                 final_result = Some(hex::encode(&v));
                 break;
