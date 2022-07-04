@@ -41,7 +41,8 @@ class SignerDataModel : ViewModel() {
 	private var hasStrongbox: Boolean = false
 
 	// Alert
-	private val _alertState: MutableLiveData<AlertState> = MutableLiveData(AlertState.None)
+	private val _alertState: MutableLiveData<AlertState> =
+		MutableLiveData(AlertState.None)
 
 	// State of the app being unlocked
 	private val _authenticated = MutableLiveData(false)
@@ -339,7 +340,10 @@ class SignerDataModel : ViewModel() {
 
 	private fun getAlertState() {
 		_alertState.value = if (historyGetWarnings(dbName)) {
-			if (alertState.value == AlertState.Active) AlertState.Active else AlertState.Past
+			if (alertState.value == AlertState.Active)
+				AlertState.Active
+			else
+				AlertState.Past
 		} else {
 			AlertState.None
 		}

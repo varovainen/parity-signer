@@ -1,9 +1,6 @@
 package io.parity.signer.screens
 
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
+import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.BorderStroke
@@ -13,10 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.State
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -26,10 +20,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import io.parity.signer.components.ScanProgressBar
+import io.parity.signer.models.CameraModel
+import io.parity.signer.models.processFrame
 import io.parity.signer.ui.theme.Crypto400
 import io.parity.signer.uniffi.Action
 
@@ -54,12 +49,9 @@ fun ScanScreen(
 	total: State<Int?>,
 	button: (Action, String, String) -> Unit,
 	handleCameraPermissions: () -> Unit,
-	processFrame: (
-		barcodeScanner: BarcodeScanner,
-		imageProxy: ImageProxy
-	) -> Unit,
 	resetScanValues: () -> Unit,
 ) {
+	val cameraModel: CameraModel = CameraModel()
 	val lifecycleOwner = LocalLifecycleOwner.current
 	val context = LocalContext.current
 	val cameraProviderFuture =
@@ -89,6 +81,10 @@ fun ScanScreen(
 					val previewView = PreviewView(context)
 					// mlkit docs: The default option is not recommended because it tries
 					// to scan all barcode formats, which is slow.
+					//
+					// In fact, it is not slow at all, no measurable difference was
+					// observed, but this avoids extra barcodes being accidentally scanned
+					// during multiframes.
 					val options = BarcodeScannerOptions.Builder()
 						.setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
 
@@ -115,7 +111,7 @@ fun ScanScreen(
 							.build()
 							.apply {
 								setAnalyzer(executor) { imageProxy ->
-									processFrame(barcodeScanner, imageProxy)
+									cameraModel.processFrame(barcodeScanner, imageProxy, button)
 								}
 							}
 

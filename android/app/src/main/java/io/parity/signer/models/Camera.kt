@@ -3,20 +3,32 @@ package io.parity.signer.models
 import android.annotation.SuppressLint
 import android.util.Log
 import androidx.camera.core.ImageProxy
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.common.InputImage
 import io.parity.signer.uniffi.Action
-import io.parity.signer.uniffi.qrparserGetPacketsTotal
-import io.parity.signer.uniffi.qrparserTryDecodeQrSequence
+
+class CameraModel {
+	private val _cameraState: MutableLiveData<String> = MutableLiveData("init")
+	val cameraState: LiveData<String> = _cameraState
+
+	fun submitFrame(frame: List<UByte>) {
+		_cameraState.value = frame.toString()
+		Log.d("Submitted frame", cameraState.value?:"failure")
+	}
+}
 
 /**
  * Barcode detecting function.
  * This uses experimental features
  */
 @SuppressLint("UnsafeOptInUsageError")
-fun SignerDataModel.processFrame(
+fun CameraModel.processFrame(
 	barcodeScanner: BarcodeScanner,
-	imageProxy: ImageProxy
+	imageProxy: ImageProxy,
+	button: (Action, String, String) -> Unit
 ) {
 	if (imageProxy.image == null) return
 	val inputImage = InputImage.fromMediaImage(
@@ -27,59 +39,8 @@ fun SignerDataModel.processFrame(
 	barcodeScanner.process(inputImage)
 		.addOnSuccessListener { barcodes ->
 			barcodes.forEach {
-				val payloadString = it?.rawBytes?.encodeHex()
-				if (!(bucket.contains(payloadString) || payloadString.isNullOrEmpty())) {
-					if (total.value == null) {
-						try {
-							val proposeTotal =
-								qrparserGetPacketsTotal(payloadString, true).toInt()
-							if (proposeTotal == 1) {
-								try {
-									payload = qrparserTryDecodeQrSequence(
-										"[\"$payloadString\"]",
-										true
-									)
-									resetScanValues()
-									pushButton(Action.TRANSACTION_FETCHED, payload)
-								} catch (e: java.lang.Exception) {
-									Log.e("Single frame decode failed", e.toString())
-								}
-							} else {
-								bucket += payloadString
-								_total.value = proposeTotal
-							}
-						} catch (e: java.lang.Exception) {
-							Log.e("QR sequence length estimation", e.toString())
-						}
-					} else {
-						bucket += payloadString
-						if ((bucket.size + 1) >= (total.value ?: 0)) {
-							try {
-								payload = qrparserTryDecodeQrSequence(
-									"[\"" + bucket.joinToString(separator = "\",\"") + "\"]",
-									true
-								)
-								if (payload.isNotEmpty()) {
-									resetScanValues()
-									pushButton(Action.TRANSACTION_FETCHED, payload)
-								}
-							} catch (e: java.lang.Exception) {
-								Log.e("failed to parse sequence", e.toString())
-							}
-						}
-						_captured.value = bucket.size
-						_progress.value = (
-							(
-								captured.value ?: 0
-								).toFloat() / (
-								(
-									total.value
-										?: 1
-									).toFloat()
-								)
-							)
-						Log.d("captured", captured.value.toString())
-					}
+				it?.rawBytes?.toUByteArray()?.toList()?.let { payload ->
+					submitFrame(payload)
 				}
 			}
 		}
