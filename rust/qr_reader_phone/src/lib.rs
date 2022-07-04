@@ -6,6 +6,8 @@ use std::convert::TryInto;
 
 use constants::{FOUNTAIN_LIMIT, FOUNTAIN_MARKER};
 
+pub mod cleanse_all;
+
 pub mod process_payload;
 use process_payload::{process_decoded_payload, InProgress, Ready};
 
