@@ -189,6 +189,68 @@ pub const EXPORT_FOLDER: &str = "../files/completed";
 pub const ALICE_SEED_PHRASE: &str =
     "bottom drive obey lake curtain smoke basket hold race lonely fit walk";
 
+/// Fountain QR code payload length upper limit
+///
+/// Maximum allowed payload length for fountain QR code is below `0x80000000`,
+/// i.e. 2_147_483_648 bytes. For comparison, current metadata QR payloads
+/// (largest payloads transferred) have lengths under 400_000 bytes.
+///
+/// There are two types of multiframe QR codes supported by Signer: fountain QR
+/// codes and legacy multiframe QR codes, and static QR codes.
+///
+/// Fountain QR codes begin with 4-bytes indicator of payload length (these 4
+/// bytes are big endian `u32` length of expected decoded payload in bytes plus
+/// `FOUNTAIN_LIMIT`). This way the first byte of a fountain QR code payload
+/// always exceeds or is equal to `FOUNTAIN_MARKER`.
+///
+/// Legacy multiframe QR codes have first payload byte `0x00`, thus clearly
+/// distinct from fountains.
+///
+/// Expected static QR codes start immediately with the payload content, i.e.
+/// `0x53..`, also distinct from fountains.
+///
+/// To distinguish between QR code variants on scanning, the first byte is used.
+///
+/// Currently Signer and related ecosystem do not generate legacy multiframe
+/// payloads.
+///
+/// To allow distinguishing between fountain and legacy multiframe QR codes when
+/// multiframe payloads are read, the length of payload (i.e. a value under
+/// `0x80000000`) remains as is for legacy multiframe and has addition of
+/// `0x80000000` for fountain QR code. The resulting value always fits in `u32`,
+/// that gets into first 4 bytes of each frame. When scanner reads a frame, if
+/// the value is below `0x80000000` it gets processed as legacy multiframe, if
+/// equal or above - as fountain QR code. The first-byte distinction is done
+/// using
+///
+/// See more details
+/// in [UOS](https://paritytech.github.io/parity-signer/development/UOS.html).
+pub const FOUNTAIN_LIMIT: u32 = 0x80000000;
+
+/// Marker to distinguish fountain QR code by the first byte
+///
+/// First byte of each fountain QR code frame is the first byte of `u32` payload
+/// length (big endian).
+///
+/// If, within allowed length limits, the first byte exceeds `FOUNTAIN_MARKER`,
+/// the QR code is the fountain one, i.e. `FOUNTAIN_LIMIT` was added to the
+/// payload length.
+///
+/// See more in [UOS](https://paritytech.github.io/parity-signer/development/UOS.html).
+pub const FOUNTAIN_MARKER: u8 = 0b10000000;
+
+/// Static QR code payload length upper limit
+///
+/// Maximum length of binary data that could be encoded in version 40 QR code.
+/// See, for example, <https://www.qrcode.com/en/about/version.html>.
+///
+/// Signer will complain if urged to create QR code for longer payload, as
+/// Signer itself does not generate fountain QR codes.
+///
+/// If longer payload is encountered in `generate_message`, for example,
+/// fountain QR code will be produced.
+pub const STATIC_LIMIT: usize = 2953;
+
 /// Data chunk size for fountain QR code generation
 #[cfg(feature = "active")]
 pub const CHUNK_SIZE: u16 = 1072;

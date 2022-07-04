@@ -790,3 +790,25 @@ interface Card {
     VerifierCard(MVerifierDetails f);
     WarningCard(string f);
 };
+
+dictionary Payload {
+    string? payload;
+};
+
+[Enum]
+interface Collection {
+    Empty();
+    Ready(sequence<u8> payload);
+    NotReady(Multi multi);
+};
+
+[Enum]
+interface Multi {
+    Fountain(sequence<sequence<u8>> content, u32 payload_length, u32 optimistic_total_expected_frames);
+    Legacy(sequence<LegacyMultiContent> content, u16 total_expected_frames);
+};
+
+dictionary LegacyMultiContent {
+    u16 order;
+    sequence<u8> data;
+};

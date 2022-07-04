@@ -3,7 +3,7 @@
 
 use anyhow::anyhow;
 use bitvec::prelude::{BitVec, Msb0};
-use constants::{qr_palette, BORDER, SCALING};
+use constants::{qr_palette, BORDER, SCALING, STATIC_LIMIT};
 use qrcodegen::{QrCode, QrCodeEcc};
 
 struct QrContent {
@@ -12,9 +12,9 @@ struct QrContent {
 }
 
 fn prepare_qr_png_data(input: &[u8]) -> anyhow::Result<QrContent> {
-    if input.len() > 2953 {
+    if input.len() > STATIC_LIMIT {
         return Err(anyhow!("Data too large to make static qr code."));
-    } // 2953 is bytes limit for qr codes having 8-bit binary data
+    }
     let qr_code = match QrCode::encode_binary(input, QrCodeEcc::Low) {
         Ok(x) => x,
         Err(e) => return Err(anyhow!("Error making qr code. {}", e)),

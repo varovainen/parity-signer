@@ -1,7 +1,9 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use bitvec::prelude::{BitVec, Msb0};
-use constants::{qr_palette, BORDER, CHUNK_SIZE, FPS_DEN, FPS_NOM, SCALING};
+use constants::{
+    qr_palette, BORDER, CHUNK_SIZE, FOUNTAIN_LIMIT, FPS_DEN, FPS_NOM, SCALING, STATIC_LIMIT,
+};
 use qrcode_static::png_qr;
 use qrcodegen::{QrCode, QrCodeEcc};
 use std::fs;
@@ -10,11 +12,11 @@ use std::fs;
 /// and serialize it to get Vec<u8> output
 fn make_data_packs(input: &[u8]) -> Result<Vec<Vec<u8>>, &'static str> {
     // checking that data is not too long, set limit for now at 2^31 bit
-    if input.len() >= 0x80000000 {
+    if input.len() >= FOUNTAIN_LIMIT as usize {
         return Err("Input data is too long, processing not possible");
     }
     // added at the beginning to each vector before transforming into qr code: contains input length info, also has first bit always 1 indicating it is new fountain qr - possibly need to change this later
-    let data_size_info = (input.len() as u32 + 0x80000000).to_be_bytes();
+    let data_size_info = (input.len() as u32 + FOUNTAIN_LIMIT).to_be_bytes();
 
     // number of additional packets; currently roughly equal to number of core packets
     let repair_packets_per_block: u32 = {
@@ -38,8 +40,7 @@ fn make_data_packs(input: &[u8]) -> Result<Vec<Vec<u8>>, &'static str> {
             return Err("Encoded chunks have different length");
         }
     }
-    if len_check > 2953 {
-        // 2953 is bytes limit for qr codes having 8-bit binary data
+    if len_check > STATIC_LIMIT {
         return Err("Encoded chunks too large to be turned into QR codes");
     }
     Ok(out)
@@ -103,7 +104,7 @@ fn transform_into_qr_apng(
 
 /// Function to make appropriately sized qr code, apng or static
 pub fn make_pretty_qr(input: &[u8], output_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if input.len() <= 2953 {
+    if input.len() <= STATIC_LIMIT {
         let qr = png_qr(input)?;
         match std::fs::write(output_name, &qr) {
             Ok(_) => Ok(()),
