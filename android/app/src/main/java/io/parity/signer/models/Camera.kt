@@ -3,32 +3,22 @@ package io.parity.signer.models
 import android.annotation.SuppressLint
 import android.util.Log
 import androidx.camera.core.ImageProxy
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.common.InputImage
 import io.parity.signer.uniffi.Action
-
-class CameraModel {
-	private val _cameraState: MutableLiveData<String> = MutableLiveData("init")
-	val cameraState: LiveData<String> = _cameraState
-
-	fun submitFrame(frame: List<UByte>) {
-		_cameraState.value = frame.toString()
-		Log.d("Submitted frame", cameraState.value?:"failure")
-	}
-}
+import io.parity.signer.uniffi.Payload
 
 /**
  * Barcode detecting function.
  * This uses experimental features
  */
+@OptIn(ExperimentalUnsignedTypes::class)
 @SuppressLint("UnsafeOptInUsageError")
-fun CameraModel.processFrame(
+fun processFrame(
 	barcodeScanner: BarcodeScanner,
 	imageProxy: ImageProxy,
-	button: (Action, String, String) -> Unit
+	button: (Action, String, String) -> Unit,
+	submitFrame: (List<UByte>) -> Payload
 ) {
 	if (imageProxy.image == null) return
 	val inputImage = InputImage.fromMediaImage(
@@ -41,6 +31,10 @@ fun CameraModel.processFrame(
 			barcodes.forEach {
 				it?.rawBytes?.toUByteArray()?.toList()?.let { payload ->
 					submitFrame(payload)
+				}?.payload?.let { payload ->
+					// This is pressed only once, that's checked in rust backend
+					// by sending complete payload only once
+					button(Action.TRANSACTION_FETCHED, payload, "")
 				}
 			}
 		}
@@ -50,14 +44,4 @@ fun CameraModel.processFrame(
 		.addOnCompleteListener {
 			imageProxy.close()
 		}
-}
-
-/**
- * Clears camera progress
- */
-fun SignerDataModel.resetScanValues() {
-	bucket = arrayOf()
-	_captured.value = null
-	_total.value = null
-	_progress.value = 0.0f
 }

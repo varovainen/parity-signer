@@ -23,10 +23,11 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import io.parity.signer.components.ScanProgressBar
-import io.parity.signer.models.CameraModel
 import io.parity.signer.models.processFrame
 import io.parity.signer.ui.theme.Crypto400
 import io.parity.signer.uniffi.Action
+import io.parity.signer.uniffi.Collection
+import io.parity.signer.uniffi.Frames
 
 @Composable
 fun KeepScreenOn() {
@@ -44,25 +45,17 @@ fun KeepScreenOn() {
  */
 @Composable
 fun ScanScreen(
-	progress: State<Float?>,
-	captured: State<Int?>,
-	total: State<Int?>,
 	button: (Action, String, String) -> Unit,
 	handleCameraPermissions: () -> Unit,
-	resetScanValues: () -> Unit,
 ) {
-	val cameraModel: CameraModel = CameraModel()
+	val collection = Collection()
+	val frames: MutableState<Frames?> = remember { mutableStateOf(null)}
 	val lifecycleOwner = LocalLifecycleOwner.current
 	val context = LocalContext.current
 	val cameraProviderFuture =
 		remember { ProcessCameraProvider.getInstance(context) }
 
-	val resetScan: () -> Unit = {
-		resetScanValues()
-		button(Action.GO_BACK, "", "")
-	}
-
-	if ((captured.value ?: 0) > 0) {
+	if (frames.value != null) {
 		KeepScreenOn()
 	}
 
@@ -111,7 +104,13 @@ fun ScanScreen(
 							.build()
 							.apply {
 								setAnalyzer(executor) { imageProxy ->
-									cameraModel.processFrame(barcodeScanner, imageProxy, button)
+									processFrame(
+										barcodeScanner,
+										imageProxy,
+										button,
+										collection::processFrame
+									)
+									frames.value = collection.frames()
 								}
 							}
 
@@ -134,15 +133,17 @@ fun ScanScreen(
 					.clip(RoundedCornerShape(8.dp))
 			)
 		}
+
 		Column(
 			verticalArrangement = Arrangement.Bottom,
 			modifier = Modifier.fillMaxSize()
 		) {
 			ScanProgressBar(
-				progress = progress,
-				captured = captured,
-				total = total,
-				resetScan = resetScan
+				frames = frames,
+				resetScan = {
+					collection.clean()
+					frames.value = collection.frames()
+				}
 			)
 		}
 	}

@@ -74,12 +74,8 @@ fun ScreenSelector(
 			addSeed = signerDataModel::addSeed
 		)
 		ScreenData.Scan -> ScanScreen(
-			progress = progress,
-			captured = captured,
-			total = total,
 			button = signerDataModel::pushButton,
 			handleCameraPermissions = signerDataModel::handleCameraPermissions,
-			resetScanValues = signerDataModel::resetScanValues,
 		)
 		is ScreenData.SeedSelector -> SeedManager(
 			screenData.f,
