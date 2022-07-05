@@ -795,20 +795,16 @@ dictionary Payload {
     string? payload;
 };
 
-[Enum]
+dictionary Frames {
+    u32 frames;
+};
+
 interface Collection {
-    Empty();
-    Ready(sequence<u8> payload);
-    NotReady(Multi multi);
-};
+    constructor();
 
-[Enum]
-interface Multi {
-    Fountain(sequence<sequence<u8>> content, u32 payload_length, u32 optimistic_total_expected_frames);
-    Legacy(sequence<LegacyMultiContent> content, u16 total_expected_frames);
-};
+    [Throws=ErrorDisplayed]
+    void clean();
 
-dictionary LegacyMultiContent {
-    u16 order;
-    sequence<u8> data;
+    [Throws=ErrorDisplayed]
+    Payload process_frame(sequence<u8> raw_frame);
 };
