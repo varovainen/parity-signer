@@ -115,6 +115,21 @@ impl Collection {
             }
         }
     }
+
+    pub fn frames(&self) -> anyhow::Result<Option<Frames>> {
+        let collection = self
+            .collection
+            .read()
+            .map_err(|_| ErrorQr::PoisonedLock.anyhow())?;
+        match &*collection {
+            CollectionBody::Empty => Ok(None),
+            CollectionBody::Ready { .. } => Ok(None),
+            CollectionBody::NotReady { multi } => Ok(Some(Frames {
+                current: multi.currently_collected_frames(),
+                total: multi.total_expected_frames(),
+            })),
+        }
+    }
 }
 
 impl Default for Collection {
@@ -178,7 +193,8 @@ pub struct Payload {
 
 /// Object to move number of frames through uniffi
 pub struct Frames {
-    pub frames: u32,
+    pub current: u32,
+    pub total: u32,
 }
 
 impl CollectionBody {
@@ -300,15 +316,11 @@ impl CollectionBody {
 }
 
 impl Multi {
-    /// Display number of good different frames already collected, for UI.
-    pub fn currently_collected_frames(&self) -> Frames {
+    /// Number of good different frames already collected.
+    fn currently_collected_frames(&self) -> u32 {
         match self {
-            Multi::Fountain { content, .. } => Frames {
-                frames: content.len() as u32,
-            },
-            Multi::Legacy { content, .. } => Frames {
-                frames: content.len() as u32,
-            },
+            Multi::Fountain { content, .. } => content.len() as u32,
+            Multi::Legacy { content, .. } => content.len() as u32,
         }
     }
 
@@ -329,20 +341,16 @@ impl Multi {
     /// that the user expectations are lower.
     ///
     /// In legacy multiframe QR codes all existing frames must be collected.
-    pub fn total_expected_frames(&self) -> Frames {
+    fn total_expected_frames(&self) -> u32 {
         match self {
             Multi::Fountain {
                 optimistic_total_expected_frames,
                 ..
-            } => Frames {
-                frames: *optimistic_total_expected_frames + 1,
-            },
+            } => *optimistic_total_expected_frames + 1,
             Multi::Legacy {
                 total_expected_frames,
                 ..
-            } => Frames {
-                frames: *total_expected_frames as u32,
-            },
+            } => *total_expected_frames as u32,
         }
     }
 }
