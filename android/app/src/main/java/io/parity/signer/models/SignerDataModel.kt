@@ -52,11 +52,6 @@ class SignerDataModel : ViewModel() {
 		Authentication(setAuth = { _authenticated.value = it })
 
 	// Camera stuff
-	internal var bucket = arrayOf<String>()
-	internal var payload: String = ""
-	internal val _total = MutableLiveData<Int?>(null)
-	internal val _captured = MutableLiveData<Int?>(null)
-	internal val _progress = MutableLiveData(0.0f)
 
 	// Transaction
 	internal var action = JSONObject()
@@ -88,10 +83,6 @@ class SignerDataModel : ViewModel() {
 	internal lateinit var sharedPreferences: SharedPreferences
 
 	// Observables for model data
-	internal val total: LiveData<Int?> = _total
-	internal val captured: LiveData<Int?> = _captured
-	val progress: LiveData<Float> = _progress
-
 	val seedNames: LiveData<Array<String>> = _seedNames
 
 	// Observables for screens state
@@ -270,7 +261,6 @@ class SignerDataModel : ViewModel() {
 			}
 		}
 	}
-
 
 	private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
 		ContextCompat.checkSelfPermission(

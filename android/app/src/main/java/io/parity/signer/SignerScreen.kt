@@ -18,9 +18,6 @@ import io.parity.signer.uniffi.ScreenData
 fun ScreenSelector(
 	screenData: ScreenData,
 	alertState: State<AlertState?>,
-	progress: State<Float?>,
-	captured: State<Int?>,
-	total: State<Int?>,
 	button: (Action, String, String) -> Unit,
 	signerDataModel: SignerDataModel
 ) {
