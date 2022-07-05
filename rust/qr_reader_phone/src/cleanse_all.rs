@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use constants::{CHUNK_SIZE, FOUNTAIN_LIMIT, FOUNTAIN_MARKER};
 use std::convert::TryInto;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Eq, PartialEq)]
 /// QR code reader errors.
@@ -19,6 +20,7 @@ pub enum ErrorQr {
     LegacyTooShortOrder { raw_frame: Vec<u8> },
     LegacyOrderTooHigh { order: u16, number_of_frames: u16 },
     LegacyZeroFrames { raw_frame: Vec<u8> },
+    PoisonedLock,
 }
 
 impl ErrorQr {
@@ -38,6 +40,7 @@ impl ErrorQr {
             ErrorQr::LegacyTooShortOrder{raw_frame} => anyhow!("Frame appears to be a legacy multiframe QR code frame, but payload {} is too short to get frame order.", show_raw_payload(raw_frame)),
             ErrorQr::LegacyOrderTooHigh{order, number_of_frames} => anyhow!("Frame appears to be a legacy multiframe QR code frame, but frame order {} is too high for expected number of frames {}.", order, number_of_frames),
             ErrorQr::LegacyZeroFrames{raw_frame} => anyhow!("Frame appears to be a legacy multiframe QR code frame, but payload {} corresponds to 0 total frames.", show_raw_payload(raw_frame)),
+            ErrorQr::PoisonedLock => anyhow!("Lock is poisoned."),
         }
     }
 }
@@ -55,17 +58,82 @@ fn show_raw_payload(raw_frame: &[u8]) -> String {
     }
 }
 
+/// Collected and processed frames interacting with the outside code through
+/// `uniffi`
 #[derive(Debug)]
+pub struct Collection {
+    pub collection: RwLock<CollectionBody>,
+}
+
+impl Collection {
+    /// Make new [`Collection`].
+    pub fn new() -> Self {
+        Collection {
+            collection: RwLock::new(CollectionBody::Empty),
+        }
+    }
+
+    /// Clean existing [`Collection`].
+    pub fn clean(self: &Arc<Self>) -> anyhow::Result<()> {
+        let mut collection = self
+            .collection
+            .write()
+            .map_err(|_| ErrorQr::PoisonedLock.anyhow())?;
+        *collection = CollectionBody::Empty;
+        Ok(())
+    }
+
+    /// Process new frame and modify [`Collection`]. Outputs optional final
+    /// result, indicating to UI that it is time to proceed.
+    pub fn process_frame(self: &Arc<Self>, raw_frame: Vec<u8>) -> anyhow::Result<Payload> {
+        let mut collection = self
+            .collection
+            .write()
+            .map_err(|_| ErrorQr::PoisonedLock.anyhow())?;
+        match &*collection {
+            CollectionBody::Empty => {
+                *collection = CollectionBody::init(raw_frame).map_err(|e| e.anyhow())?;
+                if let CollectionBody::Ready { payload } = &*collection {
+                    Ok(Payload {
+                        payload: Some(hex::encode(payload)),
+                    })
+                } else {
+                    Ok(Payload { payload: None })
+                }
+            }
+            CollectionBody::Ready { .. } => Ok(Payload { payload: None }),
+            CollectionBody::NotReady { multi } => {
+                *collection = CollectionBody::add_frame(raw_frame, multi.to_owned())
+                    .map_err(|e| e.anyhow())?;
+                if let CollectionBody::Ready { payload } = &*collection {
+                    Ok(Payload {
+                        payload: Some(hex::encode(payload)),
+                    })
+                } else {
+                    Ok(Payload { payload: None })
+                }
+            }
+        }
+    }
+}
+
+impl Default for Collection {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Collected and processed frames
-pub enum Collection {
+#[derive(Debug)]
+pub enum CollectionBody {
     /// Initiated, no frames yet received
     Empty,
 
     /// No more frames needed, result is ready
-    Ready{payload: Vec<u8>},
+    Ready { payload: Vec<u8> },
 
     /// Need more frames, for multiframe QRs only
-    NotReady{multi: Multi},
+    NotReady { multi: Multi },
 }
 
 #[derive(Clone, Debug)]
@@ -105,38 +173,15 @@ pub struct LegacyMultiContent {
 
 /// Object to move output through uniffi
 pub struct Payload {
-   pub payload: Option<String>,
+    pub payload: Option<String>,
 }
 
-impl Collection {
-    /// Make new empty [`Collection`].
-    pub fn new() -> Self {
-        Collection::Empty
-    }
+/// Object to move number of frames through uniffi
+pub struct Frames {
+    pub frames: u32,
+}
 
-    /// Clean existing [`Collection`].
-    pub fn clean(collection: &mut Self) {
-        *collection = Collection::Empty;
-    }
-
-    /// Process new frame and modify [`Collection`]. Outputs optional final
-    /// result, indicating to UI that it is time to proceed.
-    pub fn process_frame(raw_frame: Vec<u8>, collection: &mut Self) -> anyhow::Result<Payload> {
-        match collection {
-            Collection::Empty => {
-                *collection = Collection::init(raw_frame).map_err(|e| e.anyhow())?;
-                if let Collection::Ready{payload} = collection {Ok(Payload{payload: Some(hex::encode(payload))})}
-                else {Ok(Payload{payload: None})}
-            }
-            Collection::Ready{..} => Ok(Payload{payload: None}),
-            Collection::NotReady{multi} => {
-                *collection = Collection::add_frame(raw_frame, multi.to_owned()).map_err(|e| e.anyhow())?;
-                if let Collection::Ready{payload} = collection {Ok(Payload{payload: Some(hex::encode(payload))})}
-                else {Ok(Payload{payload: None})}
-            }
-        }
-    }
-
+impl CollectionBody {
     /// Initiate collection with the first frame.
     fn init(raw_frame: Vec<u8>) -> Result<Self, ErrorQr> {
         match Frame::from_raw(&raw_frame)? {
@@ -157,19 +202,23 @@ impl Collection {
                 let content = vec![frame_content];
                 if optimistic_total_expected_frames == 1 {
                     match try_fountain(&content, frame_payload_length) {
-                        Some(payload) => Ok(Collection::Ready{payload}),
-                        None => Ok(Collection::NotReady{multi: Multi::Fountain {
+                        Some(payload) => Ok(CollectionBody::Ready { payload }),
+                        None => Ok(CollectionBody::NotReady {
+                            multi: Multi::Fountain {
+                                content,
+                                payload_length: frame_payload_length,
+                                optimistic_total_expected_frames,
+                            },
+                        }),
+                    }
+                } else {
+                    Ok(CollectionBody::NotReady {
+                        multi: Multi::Fountain {
                             content,
                             payload_length: frame_payload_length,
                             optimistic_total_expected_frames,
-                        }}),
-                    }
-                } else {
-                    Ok(Collection::NotReady{multi: Multi::Fountain {
-                        content,
-                        payload_length: frame_payload_length,
-                        optimistic_total_expected_frames,
-                    }})
+                        },
+                    })
                 }
             }
             Frame::LegacyMulti {
@@ -177,15 +226,19 @@ impl Collection {
                 frame_total_expected_frames,
             } => {
                 if frame_total_expected_frames == 1 {
-                    Ok(Collection::Ready{payload: frame_content.data})
+                    Ok(CollectionBody::Ready {
+                        payload: frame_content.data,
+                    })
                 } else {
-                    Ok(Collection::NotReady{multi: Multi::Legacy {
-                        content: vec![frame_content],
-                        total_expected_frames: frame_total_expected_frames,
-                    }})
+                    Ok(CollectionBody::NotReady {
+                        multi: Multi::Legacy {
+                            content: vec![frame_content],
+                            total_expected_frames: frame_total_expected_frames,
+                        },
+                    })
                 }
             }
-            Frame::Static => Ok(Collection::Ready{payload: raw_frame}),
+            Frame::Static => Ok(CollectionBody::Ready { payload: raw_frame }),
         }
     }
 
@@ -212,11 +265,13 @@ impl Collection {
                             optimistic_total_expected_frames,
                         ))
                     } else {
-                        Ok(Collection::NotReady{multi: Multi::Fountain {
-                            content,
-                            payload_length,
-                            optimistic_total_expected_frames,
-                        }})
+                        Ok(CollectionBody::NotReady {
+                            multi: Multi::Fountain {
+                                content,
+                                payload_length,
+                                optimistic_total_expected_frames,
+                            },
+                        })
                     }
                 }
                 Multi::Legacy { .. } => Err(ErrorQr::LegacyInterruptedByFountain),
@@ -244,18 +299,16 @@ impl Collection {
     }
 }
 
-impl Default for Collection {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Multi {
     /// Display number of good different frames already collected, for UI.
-    pub fn currently_collected_frames(&self) -> u32 {
+    pub fn currently_collected_frames(&self) -> Frames {
         match self {
-            Multi::Fountain { content, .. } => content.len() as u32,
-            Multi::Legacy { content, .. } => content.len() as u32,
+            Multi::Fountain { content, .. } => Frames {
+                frames: content.len() as u32,
+            },
+            Multi::Legacy { content, .. } => Frames {
+                frames: content.len() as u32,
+            },
         }
     }
 
@@ -276,16 +329,20 @@ impl Multi {
     /// that the user expectations are lower.
     ///
     /// In legacy multiframe QR codes all existing frames must be collected.
-    pub fn total_expected_frames(&self) -> u32 {
+    pub fn total_expected_frames(&self) -> Frames {
         match self {
             Multi::Fountain {
                 optimistic_total_expected_frames,
                 ..
-            } => *optimistic_total_expected_frames + 1,
+            } => Frames {
+                frames: *optimistic_total_expected_frames + 1,
+            },
             Multi::Legacy {
                 total_expected_frames,
                 ..
-            } => *total_expected_frames as u32,
+            } => Frames {
+                frames: *total_expected_frames as u32,
+            },
         }
     }
 }
@@ -391,22 +448,26 @@ fn frame_added_to_fountain(
     content: Vec<Vec<u8>>,
     payload_length: u32,
     optimistic_total_expected_frames: u32,
-) -> Collection {
+) -> CollectionBody {
     if content.len() as u32 >= optimistic_total_expected_frames {
         match try_fountain(&content, payload_length) {
-            Some(payload) => Collection::Ready{payload},
-            None => Collection::NotReady{multi: Multi::Fountain {
+            Some(payload) => CollectionBody::Ready { payload },
+            None => CollectionBody::NotReady {
+                multi: Multi::Fountain {
+                    content,
+                    payload_length,
+                    optimistic_total_expected_frames,
+                },
+            },
+        }
+    } else {
+        CollectionBody::NotReady {
+            multi: Multi::Fountain {
                 content,
                 payload_length,
                 optimistic_total_expected_frames,
-            }},
+            },
         }
-    } else {
-        Collection::NotReady{multi: Multi::Fountain {
-            content,
-            payload_length,
-            optimistic_total_expected_frames,
-        }}
     }
 }
 
@@ -435,7 +496,7 @@ fn add_frame_to_legacy(
     frame_total_expected_frames: u16,
     mut content: Vec<LegacyMultiContent>,
     total_expected_frames: u16,
-) -> Result<Collection, ErrorQr> {
+) -> Result<CollectionBody, ErrorQr> {
     if frame_total_expected_frames != total_expected_frames {
         return Err(ErrorQr::LegacyDifferentLength);
     }
@@ -460,18 +521,22 @@ fn add_frame_to_legacy(
             for element in content.iter() {
                 payload.extend_from_slice(&element.data);
             }
-            Ok(Collection::Ready{payload})
+            Ok(CollectionBody::Ready { payload })
         } else {
-            Ok(Collection::NotReady{multi: Multi::Legacy {
-                content,
-                total_expected_frames,
-            }})
+            Ok(CollectionBody::NotReady {
+                multi: Multi::Legacy {
+                    content,
+                    total_expected_frames,
+                },
+            })
         }
     } else {
-        Ok(Collection::NotReady{multi: Multi::Legacy {
-            content,
-            total_expected_frames,
-        }})
+        Ok(CollectionBody::NotReady {
+            multi: Multi::Legacy {
+                content,
+                total_expected_frames,
+            },
+        })
     }
 }
 
@@ -481,37 +546,40 @@ mod tests {
 
     #[test]
     fn init_no_panic() {
-        assert_eq!(Collection::init(vec![]).unwrap_err(), ErrorQr::EmptyFrame);
         assert_eq!(
-            Collection::init(vec![128]).unwrap_err(),
+            CollectionBody::init(vec![]).unwrap_err(),
+            ErrorQr::EmptyFrame
+        );
+        assert_eq!(
+            CollectionBody::init(vec![128]).unwrap_err(),
             ErrorQr::FountainFrameTooShort {
                 raw_frame: vec![128]
             }
         );
         assert_eq!(
-            Collection::init(vec![128, 155, 100, 108]).unwrap_err(),
+            CollectionBody::init(vec![128, 155, 100, 108]).unwrap_err(),
             ErrorQr::FountainPacketEmpty {
                 raw_frame: vec![128, 155, 100, 108]
             }
         );
         assert_eq!(
-            Collection::init(vec![0]).unwrap_err(),
+            CollectionBody::init(vec![0]).unwrap_err(),
             ErrorQr::LegacyTooShortNumberOfFrames { raw_frame: vec![0] }
         );
         assert_eq!(
-            Collection::init([0; 3].to_vec()).unwrap_err(),
+            CollectionBody::init([0; 3].to_vec()).unwrap_err(),
             ErrorQr::LegacyZeroFrames {
                 raw_frame: [0; 3].to_vec()
             }
         );
         assert_eq!(
-            Collection::init(vec![0, 1, 0, 5]).unwrap_err(),
+            CollectionBody::init(vec![0, 1, 0, 5]).unwrap_err(),
             ErrorQr::LegacyTooShortOrder {
                 raw_frame: vec![0, 1, 0, 5]
             }
         );
         assert_eq!(
-            Collection::init(vec![0, 0, 5, 0, 8]).unwrap_err(),
+            CollectionBody::init(vec![0, 0, 5, 0, 8]).unwrap_err(),
             ErrorQr::LegacyOrderTooHigh {
                 order: 8,
                 number_of_frames: 5
