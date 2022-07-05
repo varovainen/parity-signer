@@ -796,7 +796,8 @@ dictionary Payload {
 };
 
 dictionary Frames {
-    u32 frames;
+    u32 current;
+    u32 total;
 };
 
 interface Collection {
@@ -807,4 +808,7 @@ interface Collection {
 
     [Throws=ErrorDisplayed]
     Payload process_frame(sequence<u8> raw_frame);
+
+    [Throws=ErrorDisplayed]
+    Frames? frames();
 };
