@@ -14,7 +14,7 @@ pub use definitions::{
     },
 };
 pub use navigator::Action;
-pub use qr_reader_phone::cleanse_all::{Collection, Frames, Payload};
+pub use qr_reader_phone::cleanse_all::{Collection, ErrorQr, Frames, Payload};
 
 use std::convert::{TryFrom, TryInto};
 

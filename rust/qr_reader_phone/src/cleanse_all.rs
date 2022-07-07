@@ -1,47 +1,62 @@
-use anyhow::anyhow;
 use constants::{CHUNK_SIZE, FOUNTAIN_LIMIT, FOUNTAIN_MARKER};
 use std::convert::TryInto;
 use std::sync::{Arc, RwLock};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
 /// QR code reader errors.
 pub enum ErrorQr {
+    #[error("Empty frame.")]
     EmptyFrame,
+
+    #[error("While collecting fountain QR code, encountered a frame for different payload length.")]
     FountainDifferentLength,
+
+    #[error("Frame appears to be a fountain QR code frame, but payload {} is too short to get payload length.", show_raw_payload(raw_frame))]
     FountainFrameTooShort { raw_frame: Vec<u8> },
+
+    #[error("Collecting fountain QR code was interrupted by a legacy multiframe QR frame.")]
     FountainInterruptedByLegacy,
+
+    #[error("Collecting fountain QR code was interrupted by a static QR frame.")]
     FountainInterruptedByStatic,
+
+    #[error("Frame appears to be a fountain QR code frame, but payload {} contains empty packet.", show_raw_payload(raw_frame))]
     FountainPacketEmpty { raw_frame: Vec<u8> },
+
+    #[error("While collecting legacy multiframe QR code, encountered a frame from a different one.")]
     LegacyDifferentLength,
+
+    #[error("Collecting legacy multiframe QR code was interrupted by a fountain QR frame.")]
     LegacyInterruptedByFountain,
+
+    #[error("Collecting legacy multiframe QR code was interrupted by a static QR frame.")]
     LegacyInterruptedByStatic,
+
+    #[error("While collecting legacy multiframe QR code, encountered two different frames with same order.")]
     LegacySameOrderDifferentContent,
+
+    #[error("Frame appears to be a legacy multiframe QR code frame, but payload {} is too short to get total number of frames.", show_raw_payload(raw_frame))]
     LegacyTooShortNumberOfFrames { raw_frame: Vec<u8> },
+
+    #[error("Frame appears to be a legacy multiframe QR code frame, but payload {} is too short to get frame order.", show_raw_payload(raw_frame))]
     LegacyTooShortOrder { raw_frame: Vec<u8> },
+
+    #[error("Frame appears to be a legacy multiframe QR code frame, but frame order {} is too high for expected number of frames {}.", order, number_of_frames)]
     LegacyOrderTooHigh { order: u16, number_of_frames: u16 },
+
+    #[error("Frame appears to be a legacy multiframe QR code frame, but payload {} corresponds to 0 total frames.", show_raw_payload(raw_frame))]
     LegacyZeroFrames { raw_frame: Vec<u8> },
+
+    #[error("Lock is poisoned.")]
     PoisonedLock,
+
+    #[error("Error from anyhow? {0}")]
+    SomeAdditionalError(String),
 }
 
-impl ErrorQr {
-    pub fn anyhow(&self) -> anyhow::Error {
-        match self {
-            ErrorQr::EmptyFrame => anyhow!("Empty frame."),
-            ErrorQr::FountainDifferentLength => anyhow!("While collecting fountain QR code, encountered a frame for different payload length."),
-            ErrorQr::FountainFrameTooShort{raw_frame} => anyhow!("Frame appears to be a fountain QR code frame, but payload {} is too short to get payload length.", show_raw_payload(raw_frame)),
-            ErrorQr::FountainInterruptedByLegacy => anyhow!("Collecting fountain QR code was interrupted by a legacy multiframe QR frame."),
-            ErrorQr::FountainInterruptedByStatic => anyhow!("Collecting fountain QR code was interrupted by a static QR frame."),
-            ErrorQr::FountainPacketEmpty{raw_frame} => anyhow!("Frame appears to be a fountain QR code frame, but payload {} contains empty packet.", show_raw_payload(raw_frame)),
-            ErrorQr::LegacyDifferentLength => anyhow!("While collecting legacy multiframe QR code, encountered a frame from a different one."),
-            ErrorQr::LegacyInterruptedByFountain => anyhow!("Collecting legacy multiframe QR code was interrupted by a fountain QR frame."),
-            ErrorQr::LegacyInterruptedByStatic => anyhow!("Collecting legacy multiframe QR code was interrupted by a static QR frame."),
-            ErrorQr::LegacySameOrderDifferentContent => anyhow!("While collecting legacy multiframe QR code, encountered two different frames with same order."),
-            ErrorQr::LegacyTooShortNumberOfFrames{raw_frame} => anyhow!("Frame appears to be a legacy multiframe QR code frame, but payload {} is too short to get total number of frames.", show_raw_payload(raw_frame)),
-            ErrorQr::LegacyTooShortOrder{raw_frame} => anyhow!("Frame appears to be a legacy multiframe QR code frame, but payload {} is too short to get frame order.", show_raw_payload(raw_frame)),
-            ErrorQr::LegacyOrderTooHigh{order, number_of_frames} => anyhow!("Frame appears to be a legacy multiframe QR code frame, but frame order {} is too high for expected number of frames {}.", order, number_of_frames),
-            ErrorQr::LegacyZeroFrames{raw_frame} => anyhow!("Frame appears to be a legacy multiframe QR code frame, but payload {} corresponds to 0 total frames.", show_raw_payload(raw_frame)),
-            ErrorQr::PoisonedLock => anyhow!("Lock is poisoned."),
-        }
+impl From<anyhow::Error> for ErrorQr {
+    fn from(e: anyhow::Error) -> Self {
+        ErrorQr::SomeAdditionalError(e.to_string())
     }
 }
 
@@ -62,7 +77,7 @@ fn show_raw_payload(raw_frame: &[u8]) -> String {
 /// `uniffi`
 #[derive(Debug)]
 pub struct Collection {
-    pub collection: RwLock<CollectionBody>,
+    collection: RwLock<CollectionBody>,
 }
 
 impl Collection {
@@ -74,25 +89,25 @@ impl Collection {
     }
 
     /// Clean existing [`Collection`].
-    pub fn clean(self: &Arc<Self>) -> anyhow::Result<()> {
+    pub fn clean(self: &Arc<Self>) -> Result<(), ErrorQr> {
         let mut collection = self
             .collection
             .write()
-            .map_err(|_| ErrorQr::PoisonedLock.anyhow())?;
+            .map_err(|_| ErrorQr::PoisonedLock)?;
         *collection = CollectionBody::Empty;
         Ok(())
     }
 
     /// Process new frame and modify [`Collection`]. Outputs optional final
     /// result, indicating to UI that it is time to proceed.
-    pub fn process_frame(self: &Arc<Self>, raw_frame: Vec<u8>) -> anyhow::Result<Payload> {
+    pub fn process_frame(self: &Arc<Self>, raw_frame: Vec<u8>) -> Result<Payload, ErrorQr> {
         let mut collection = self
             .collection
             .write()
-            .map_err(|_| ErrorQr::PoisonedLock.anyhow())?;
+            .map_err(|_| ErrorQr::PoisonedLock)?;
         match &*collection {
             CollectionBody::Empty => {
-                *collection = CollectionBody::init(raw_frame).map_err(|e| e.anyhow())?;
+                *collection = CollectionBody::init(raw_frame)?;
                 if let CollectionBody::Ready { payload } = &*collection {
                     Ok(Payload {
                         payload: Some(hex::encode(payload)),
@@ -103,8 +118,7 @@ impl Collection {
             }
             CollectionBody::Ready { .. } => Ok(Payload { payload: None }),
             CollectionBody::NotReady { multi } => {
-                *collection = CollectionBody::add_frame(raw_frame, multi.to_owned())
-                    .map_err(|e| e.anyhow())?;
+                *collection = CollectionBody::add_frame(raw_frame, multi.to_owned())?;
                 if let CollectionBody::Ready { payload } = &*collection {
                     Ok(Payload {
                         payload: Some(hex::encode(payload)),
@@ -120,7 +134,7 @@ impl Collection {
         let collection = self
             .collection
             .read()
-            .map_err(|_| ErrorQr::PoisonedLock.anyhow())?;
+            .map_err(|_| ErrorQr::PoisonedLock)?;
         match &*collection {
             CollectionBody::Empty => Ok(None),
             CollectionBody::Ready { .. } => Ok(None),
@@ -139,8 +153,8 @@ impl Default for Collection {
 }
 
 /// Collected and processed frames
-#[derive(Debug)]
-pub enum CollectionBody {
+#[derive(Debug, PartialEq)]
+enum CollectionBody {
     /// Initiated, no frames yet received
     Empty,
 
@@ -151,9 +165,9 @@ pub enum CollectionBody {
     NotReady { multi: Multi },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 /// Partially collected and processed multiframe QR data
-pub enum Multi {
+enum Multi {
     /// Fountain QR
     Fountain {
         /// packet set
@@ -176,14 +190,14 @@ pub enum Multi {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 /// Individual frame content for legacy multiframe QRs
-pub struct LegacyMultiContent {
+struct LegacyMultiContent {
     /// order [0..total_expected_frames)
-    pub order: u16,
+    order: u16,
 
     /// corresponding data
-    pub data: Vec<u8>,
+    data: Vec<u8>,
 }
 
 /// Object to move output through uniffi
@@ -209,12 +223,19 @@ impl CollectionBody {
                     return Err(ErrorQr::FountainPacketEmpty { raw_frame });
                 }
 
+                let frame_content_len = frame_content.len() as u32;
+
                 // this is minimal number of frames at which the Raptor decoder
                 // is tried
                 //
                 // expected number of frames displayed to user is higher by one
-                let optimistic_total_expected_frames =
-                    frame_payload_length / (frame_content.len() as u32);
+                let optimistic_total_expected_frames = {
+                    if frame_payload_length % frame_content_len == 0 {
+                        frame_payload_length / frame_content_len
+                    } else {
+                        frame_payload_length / frame_content_len + 1
+                    }
+                };
                 let content = vec![frame_content];
                 if optimistic_total_expected_frames == 1 {
                     match try_fountain(&content, frame_payload_length) {
@@ -328,12 +349,16 @@ impl Multi {
     /// UI.
     ///
     /// In fountain QR decoding the decoding algorithm is probabilistic, see
-    /// documentation of the `raptorq` crate.
+    /// documentation of the `raptorq` crate and
+    /// <https://datatracker.ietf.org/doc/html/rfc6330>.
     ///
-    /// Rephrasing from there, the probability to decode message with h
-    /// additional packets is 1 - 1/256^(h+1).
+    /// Rephrasing from there, the probability to decode message with all source
+    /// packets and h additional repair packets is 1 - 1/256^(h+1).
     ///
-    /// Thus, if there are no additional packets, probability is ~ 0.99609.
+    /// Value `optimistic_total_expected_frames` equals to number of source
+    /// packets.
+    ///
+    /// If there are no additional packets, probability is ~ 0.99609.
     ///
     /// If one additional packet is added, it is ~ 0.99998.
     ///
@@ -591,6 +616,54 @@ mod tests {
             ErrorQr::LegacyOrderTooHigh {
                 order: 8,
                 number_of_frames: 5
+            }
+        );
+    }
+
+    #[test]
+    fn init_correct_outcome() {
+        // single frame in legacy multiframe format
+        assert_eq!(
+            CollectionBody::init(vec![0, 0, 1, 0, 0, 3, 14, 15, 92, 6, 54]).unwrap(),
+            CollectionBody::Ready {
+                payload: vec![3, 14, 15, 92, 6, 54]
+            },
+        );
+
+        // single frame in fountain multiframe format
+        assert_eq!(
+            CollectionBody::init(
+                [
+                    vec![128, 0, 0, 7, 0, 0, 0, 0, 14, 25, 26, 17, 33, 21, 60],
+                    [0; 1065].to_vec()
+                ]
+                .concat()
+            )
+            .unwrap(),
+            CollectionBody::Ready {
+                payload: vec![14, 25, 26, 17, 33, 21, 60]
+            },
+        );
+
+        // single frame in fountain multiframe format, real payload is `[100; 1072].to_vec()`
+        assert_eq!(
+            CollectionBody::init([vec![128, 0, 4, 48, 0, 0, 0, 0], [100; 1072].to_vec()].concat())
+                .unwrap(),
+            CollectionBody::Ready {
+                payload: [100; 1072].to_vec()
+            },
+        );
+
+        // first frame in founrain multiframe format, real payload is `[100; 2144].to_vec()`
+        assert_eq!(
+            CollectionBody::init([vec![128, 0, 8, 96, 0, 0, 0, 0], [100; 1072].to_vec()].concat())
+                .unwrap(),
+            CollectionBody::NotReady {
+                multi: Multi::Fountain {
+                    content: vec![[[0; 4].to_vec(), [100; 1072].to_vec()].concat()],
+                    payload_length: 2144,
+                    optimistic_total_expected_frames: 2,
+                }
             }
         );
     }
