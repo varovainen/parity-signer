@@ -1,5 +1,6 @@
 package io.parity.signer.screens
 
+import android.widget.Toast
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -48,7 +49,7 @@ fun ScanScreen(
 	button: (Action, String, String) -> Unit,
 	handleCameraPermissions: () -> Unit,
 ) {
-	val collection = Collection()
+	var collection = remember { Collection() }
 	val frames: MutableState<Frames?> = remember { mutableStateOf(null)}
 	val lifecycleOwner = LocalLifecycleOwner.current
 	val context = LocalContext.current
@@ -108,9 +109,19 @@ fun ScanScreen(
 										barcodeScanner,
 										imageProxy,
 										button,
+										context,
 										collection::processFrame
-									)
-									frames.value = collection.frames()
+									) {
+										try {
+											frames.value = collection.frames()
+										} catch (e: io.parity.signer.uniffi.ErrorQr) {
+											Toast.makeText(
+												context,
+												"QR scanner error: " + e.message,
+												Toast.LENGTH_LONG
+											).show()
+										}
+									}
 								}
 							}
 
@@ -141,8 +152,17 @@ fun ScanScreen(
 			ScanProgressBar(
 				frames = frames,
 				resetScan = {
-					collection.clean()
-					frames.value = collection.frames()
+					try {
+						collection.clean()
+						frames.value = collection.frames()
+					} catch (e: io.parity.signer.uniffi.ErrorQr) {
+						Toast
+							.makeText(
+								context,
+								"QR scanner reset error: " + e.message,
+								Toast.LENGTH_LONG
+							).show()
+					}
 				}
 			)
 		}
