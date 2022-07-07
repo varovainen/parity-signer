@@ -803,12 +803,32 @@ dictionary Frames {
 interface Collection {
     constructor();
 
-    [Throws=ErrorDisplayed]
+    [Throws=ErrorQr]
     void clean();
 
-    [Throws=ErrorDisplayed]
+    [Throws=ErrorQr]
     Payload process_frame(sequence<u8> raw_frame);
 
-    [Throws=ErrorDisplayed]
+    [Throws=ErrorQr]
     Frames? frames();
+};
+
+[Error]
+enum ErrorQr {
+    "EmptyFrame",
+    "FountainDifferentLength",
+    "FountainFrameTooShort",
+    "FountainInterruptedByLegacy",
+    "FountainInterruptedByStatic",
+    "FountainPacketEmpty",
+    "LegacyDifferentLength",
+    "LegacyInterruptedByFountain",
+    "LegacyInterruptedByStatic",
+    "LegacySameOrderDifferentContent",
+    "LegacyTooShortNumberOfFrames",
+    "LegacyTooShortOrder",
+    "LegacyOrderTooHigh",
+    "LegacyZeroFrames",
+    "PoisonedLock",
+    "SomeAdditionalError",
 };
