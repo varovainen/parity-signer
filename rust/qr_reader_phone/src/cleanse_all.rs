@@ -8,7 +8,9 @@ pub enum ErrorQr {
     #[error("Empty frame.")]
     EmptyFrame,
 
-    #[error("While collecting fountain QR code, encountered a frame for different payload length.")]
+    #[error(
+        "While collecting fountain QR code, encountered a frame for different payload length."
+    )]
     FountainDifferentLength,
 
     #[error("Frame appears to be a fountain QR code frame, but payload {} is too short to get payload length.", show_raw_payload(raw_frame))]
@@ -20,10 +22,15 @@ pub enum ErrorQr {
     #[error("Collecting fountain QR code was interrupted by a static QR frame.")]
     FountainInterruptedByStatic,
 
-    #[error("Frame appears to be a fountain QR code frame, but payload {} contains empty packet.", show_raw_payload(raw_frame))]
+    #[error(
+        "Frame appears to be a fountain QR code frame, but payload {} contains empty packet.",
+        show_raw_payload(raw_frame)
+    )]
     FountainPacketEmpty { raw_frame: Vec<u8> },
 
-    #[error("While collecting legacy multiframe QR code, encountered a frame from a different one.")]
+    #[error(
+        "While collecting legacy multiframe QR code, encountered a frame from a different one."
+    )]
     LegacyDifferentLength,
 
     #[error("Collecting legacy multiframe QR code was interrupted by a fountain QR frame.")]
@@ -90,10 +97,7 @@ impl Collection {
 
     /// Clean existing [`Collection`].
     pub fn clean(self: &Arc<Self>) -> Result<(), ErrorQr> {
-        let mut collection = self
-            .collection
-            .write()
-            .map_err(|_| ErrorQr::PoisonedLock)?;
+        let mut collection = self.collection.write().map_err(|_| ErrorQr::PoisonedLock)?;
         *collection = CollectionBody::Empty;
         Ok(())
     }
@@ -101,10 +105,7 @@ impl Collection {
     /// Process new frame and modify [`Collection`]. Outputs optional final
     /// result, indicating to UI that it is time to proceed.
     pub fn process_frame(self: &Arc<Self>, raw_frame: Vec<u8>) -> Result<Payload, ErrorQr> {
-        let mut collection = self
-            .collection
-            .write()
-            .map_err(|_| ErrorQr::PoisonedLock)?;
+        let mut collection = self.collection.write().map_err(|_| ErrorQr::PoisonedLock)?;
         match &*collection {
             CollectionBody::Empty => {
                 *collection = CollectionBody::init(raw_frame)?;
@@ -131,10 +132,7 @@ impl Collection {
     }
 
     pub fn frames(&self) -> anyhow::Result<Option<Frames>> {
-        let collection = self
-            .collection
-            .read()
-            .map_err(|_| ErrorQr::PoisonedLock)?;
+        let collection = self.collection.read().map_err(|_| ErrorQr::PoisonedLock)?;
         match &*collection {
             CollectionBody::Empty => Ok(None),
             CollectionBody::Ready { .. } => Ok(None),
