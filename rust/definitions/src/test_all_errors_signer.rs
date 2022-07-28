@@ -10,9 +10,6 @@
 
 use std::str::FromStr;
 
-#[cfg(test)]
-use std::fmt::Write as _;
-
 use anyhow::anyhow;
 use sled::{transaction::TransactionError, IVec};
 use sp_core::crypto::SecretStringError;
@@ -501,8 +498,7 @@ fn input_signer() -> Vec<InputSigner> {
     // More [`InputSigner`] errors.
     out.append(&mut vec![
         InputSigner::TypesKnown,
-        InputSigner::MessageNoWrapper,
-        InputSigner::MessageNotValidUtf8,
+        InputSigner::MessageNotReadable,
         InputSigner::UnknownNetwork {
             genesis_hash: genesis_hash(),
             encryption: Encryption::Sr25519,
@@ -520,6 +516,7 @@ fn input_signer() -> Vec<InputSigner> {
             new_verifier_value: verifier_value_ed25519(),
         },
         InputSigner::InvalidDerivation(String::from("//")),
+        InputSigner::OnlyNoPwdDerivations,
         InputSigner::SeedNameExists(String::from("Alice")),
     ]);
 
@@ -650,7 +647,7 @@ fn parser_decoding_error() -> Vec<ParserDecodingError> {
         ParserDecodingError::ArgumentNameError,
         ParserDecodingError::NoCompact,
         ParserDecodingError::DataTooShort,
-        ParserDecodingError::PrimitiveFailure(String::from("u32")),
+        ParserDecodingError::PrimitiveFailure("u32"),
         ParserDecodingError::UnexpectedOptionVariant,
         ParserDecodingError::IdFields,
         ParserDecodingError::BalanceNotDescribed,
@@ -789,9 +786,6 @@ pub fn error_signer() -> Vec<ErrorSigner> {
     out.push(ErrorSigner::TimeFormat(
         time::error::Format::InvalidComponent("distance"),
     ));
-
-    // `NoSeeds` error.
-    out.push(ErrorSigner::NoKnownSeeds);
 
     // `SeedPhraseEmpty` error.
     out.push(ErrorSigner::SeedPhraseEmpty);
@@ -1010,7 +1004,7 @@ mod tests {
     fn print_signer_errors_nicely() {
         let mut print = String::from("\n");
         for e in error_signer().iter() {
-            let _ = write!(print, "\"{}\"", <Signer>::show(e));
+            print.push_str(&format!("\"{}\"", <Signer>::show(e)));
             print.push('\n');
         }
         let print_expected = r#"
@@ -1107,13 +1101,13 @@ mod tests {
 "Bad input data. General verifier in the database is public key: 8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48, encryption: sr25519. Received network westend specs could be accepted only if verified by the same general verifier. Current message is verified by public key: 8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48, encryption: ed25519."
 "Bad input data. General verifier in the database is public key: 8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48, encryption: sr25519. Received types information could be accepted only if verified by the same general verifier. Current message is verified by public key: 8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48, encryption: ed25519."
 "Bad input data. Exactly same types information is already in the database."
-"Bad input data. Received message has no `<Bytes></Bytes>` wrapper."
-"Bad input data. Received message could not be represented as valid utf8 sequence."
+"Bad input data. Received message could not be read."
 "Bad input data. Input generated within unknown network and could not be processed. Add network with genesis hash e143f23803ca50e8f6f8e62695d1ce9e4e1d68aa36c1cd2cfd15340213f3423e and encryption sr25519."
 "Bad input data. Input transaction is generated in network westend. Currently there are no metadata entries for it, and transaction could not be processed. Add network metadata."
 "Bad input data. Exactly same network specs for network westend with encryption sr25519 are already in the database."
 "Bad input data. Network kulupu current verifier is public key: 8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48, encryption: sr25519. Received add_specs message is verified by public key: 8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48, encryption: ed25519, which is neither current network verifier not the general verifier. Changing the network verifier to another non-general one would require wipe and reset of Signer."
 "Bad input data. Derivation // has invalid format."
+"Bad input data. Only derivations without passwords are allowed in bulk import."
 "Bad input data. Seed name Alice already exists."
 "Could not find current verifier for network with genesis hash 853faffbfc6713c1f899bf16547fcfbf733ae8361b8ca0129699d01d4f2181fd."
 "Could not find general verifier."
@@ -1190,7 +1184,6 @@ mod tests {
 "Wrong password."
 "No networks available. Please load networks information to proceed."
 "Unable to produce timestamp. The distance component cannot be formatted into the requested format."
-"There are no seeds. Please create a seed first."
 "Signer expected seed phrase, but the seed phrase is empty. Please report this bug."
 "Signer expected seed name, but the seed name is empty. Please report this bug."
 "#;

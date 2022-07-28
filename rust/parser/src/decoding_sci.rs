@@ -1,5 +1,7 @@
-use std::fmt::Write as _;
-
+//! Decode call data using metadata [`RuntimeMetadataV14`]
+//!
+//! Metadata [`RuntimeMetadataV14`] contains types description inside, that gets
+//! used for the decoding.
 use bitvec::{
     order::BitOrder,
     prelude::{BitVec, Lsb0, Msb0},
@@ -12,16 +14,13 @@ use scale_info::{
     form::PortableForm, Field, Type, TypeDef, TypeDefBitSequence, TypeDefComposite,
     TypeDefPrimitive, TypeDefVariant,
 };
+use sp_arithmetic::{PerU16, Perbill, Percent, Permill, Perquintill};
 
-use definitions::{
-    error_signer::{ParserDecodingError, ParserError, ParserMetadataError},
-    network_specs::ShortSpecs,
-};
+use definitions::error_signer::{ParserDecodingError, ParserError, ParserMetadataError};
 
 use crate::cards::ParserCard;
 use crate::decoding_commons::{
-    decode_known_length, decode_primitive_with_flags, get_compact, special_case_account_id,
-    DecodedOut, OutputCard,
+    get_compact, special_case_account_id, OutputCard, StLenCheckCompact, StLenCheckSpecialtyCompact,
 };
 use crate::decoding_sci_ext::{special_case_era, special_case_hash, Ext, Hash, SpecialExt};
 
@@ -63,96 +62,38 @@ fn decode_type_def_primitive(
     possible_ext: &mut Option<&mut Ext>,
     compact_flag: bool,
     balance_flag: bool,
-    data: &[u8],
+    data: &mut Vec<u8>,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
+) -> Result<OutputCard, ParserError> {
     match found_ty {
-        TypeDefPrimitive::Bool => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_known_length::<bool>(data, "bool", indent)
-        }
-        TypeDefPrimitive::Char => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_char(data, indent)
-        }
+        TypeDefPrimitive::Bool => bool::decode_checked(data, indent, compact_flag),
+        TypeDefPrimitive::Char => char::decode_checked(data, indent, compact_flag),
         TypeDefPrimitive::Str => {
             reject_flags(compact_flag, balance_flag)?;
             decode_str(data, indent)
         }
-        TypeDefPrimitive::U8 => decode_primitive_with_flags::<u8>(
-            data,
-            possible_ext,
-            compact_flag,
-            balance_flag,
-            "u8",
-            indent,
-            short_specs,
-        ),
-        TypeDefPrimitive::U16 => decode_primitive_with_flags::<u16>(
-            data,
-            possible_ext,
-            compact_flag,
-            balance_flag,
-            "u16",
-            indent,
-            short_specs,
-        ),
-        TypeDefPrimitive::U32 => decode_primitive_with_flags::<u32>(
-            data,
-            possible_ext,
-            compact_flag,
-            balance_flag,
-            "u32",
-            indent,
-            short_specs,
-        ),
-        TypeDefPrimitive::U64 => decode_primitive_with_flags::<u64>(
-            data,
-            possible_ext,
-            compact_flag,
-            balance_flag,
-            "u64",
-            indent,
-            short_specs,
-        ),
-        TypeDefPrimitive::U128 => decode_primitive_with_flags::<u128>(
-            data,
-            possible_ext,
-            compact_flag,
-            balance_flag,
-            "u128",
-            indent,
-            short_specs,
-        ),
-        TypeDefPrimitive::U256 => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_big256(data, false, indent)
+        TypeDefPrimitive::U8 => {
+            u8::decode_checked(data, indent, possible_ext, balance_flag, compact_flag)
         }
-        TypeDefPrimitive::I8 => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_known_length::<i8>(data, "i8", indent)
+        TypeDefPrimitive::U16 => {
+            u16::decode_checked(data, indent, possible_ext, balance_flag, compact_flag)
         }
-        TypeDefPrimitive::I16 => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_known_length::<i16>(data, "i16", indent)
+        TypeDefPrimitive::U32 => {
+            u32::decode_checked(data, indent, possible_ext, balance_flag, compact_flag)
         }
-        TypeDefPrimitive::I32 => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_known_length::<i32>(data, "i32", indent)
+        TypeDefPrimitive::U64 => {
+            u64::decode_checked(data, indent, possible_ext, balance_flag, compact_flag)
         }
-        TypeDefPrimitive::I64 => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_known_length::<i64>(data, "i64", indent)
+        TypeDefPrimitive::U128 => {
+            u128::decode_checked(data, indent, possible_ext, balance_flag, compact_flag)
         }
-        TypeDefPrimitive::I128 => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_known_length::<i128>(data, "i128", indent)
-        }
-        TypeDefPrimitive::I256 => {
-            reject_flags(compact_flag, balance_flag)?;
-            decode_big256(data, true, indent)
-        }
+        TypeDefPrimitive::U256 => BigUint::decode_checked(data, indent, compact_flag),
+        TypeDefPrimitive::I8 => i8::decode_checked(data, indent, compact_flag),
+        TypeDefPrimitive::I16 => i16::decode_checked(data, indent, compact_flag),
+        TypeDefPrimitive::I32 => i32::decode_checked(data, indent, compact_flag),
+        TypeDefPrimitive::I64 => i64::decode_checked(data, indent, compact_flag),
+        TypeDefPrimitive::I128 => i128::decode_checked(data, indent, compact_flag),
+        TypeDefPrimitive::I256 => BigInt::decode_checked(data, indent, compact_flag),
     }
 }
 
@@ -170,44 +111,6 @@ fn reject_flags(compact_flag: bool, balance_flag: bool) -> Result<(), ParserErro
     Ok(())
 }
 
-/// Function to decode `char`.
-/// `char` is always 4 byte element, so the needed length pre-determined.
-///
-/// The function decodes only `char` part, removes already decoded part of input data Vec<u8>,
-/// and returns whatever remains as DecodedOut field remaining_vector, which is processed later separately.
-///
-/// The function takes as arguments
-/// - data (remaining Vec<u8> of data),
-/// - indent used for creating properly formatted output cards.
-///
-/// The function outputs the DecodedOut value in case of success.
-fn decode_char(data: &[u8], indent: u32) -> Result<DecodedOut, ParserError> {
-    match data.get(0..4) {
-        Some(mut slice_to_char) => match <u32>::decode(&mut slice_to_char) {
-            Ok(a) => match char::from_u32(a) {
-                Some(b) => {
-                    let fancy_out = vec![OutputCard {
-                        card: ParserCard::Default(b.to_string()),
-                        indent,
-                    }];
-                    let remaining_vector = (data[4..]).to_vec();
-                    Ok(DecodedOut {
-                        remaining_vector,
-                        fancy_out,
-                    })
-                }
-                None => Err(ParserError::Decoding(
-                    ParserDecodingError::PrimitiveFailure("char".to_string()),
-                )),
-            },
-            Err(_) => Err(ParserError::Decoding(
-                ParserDecodingError::PrimitiveFailure("char".to_string()),
-            )),
-        },
-        None => Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
-    }
-}
-
 /// Function to decode `str`.
 /// `str` is encoded as a vector of utf-converteable elements, and is therefore
 /// preluded by the number of elements as compact.
@@ -220,93 +123,36 @@ fn decode_char(data: &[u8], indent: u32) -> Result<DecodedOut, ParserError> {
 /// - indent used for creating properly formatted output cards.
 ///
 /// The function outputs the DecodedOut value in case of success.
-fn decode_str(data: &[u8], indent: u32) -> Result<DecodedOut, ParserError> {
-    let pre_str = get_compact::<u32>(data)?;
-    let str_length = pre_str.compact_found as usize;
-    match pre_str.start_next_unit {
-        Some(start) => match data.get(start..start + str_length) {
+fn decode_str(data: &mut Vec<u8>, indent: u32) -> Result<OutputCard, ParserError> {
+    let str_length = get_compact::<u32>(data)? as usize;
+    if !data.is_empty() {
+        match data.get(..str_length) {
             Some(a) => {
                 let text = match String::from_utf8(a.to_vec()) {
                     Ok(b) => b,
                     Err(_) => {
                         return Err(ParserError::Decoding(
-                            ParserDecodingError::PrimitiveFailure("str".to_string()),
+                            ParserDecodingError::PrimitiveFailure("str"),
                         ))
                     }
                 };
-                let fancy_out = vec![OutputCard {
+                let out = OutputCard {
                     card: ParserCard::Text(text),
                     indent,
-                }];
-                let remaining_vector = data[start + str_length..].to_vec();
-                Ok(DecodedOut {
-                    remaining_vector,
-                    fancy_out,
-                })
+                };
+                *data = data[str_length..].to_vec();
+                Ok(out)
             }
             None => Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
-        },
-        None => {
-            if str_length != 0 {
-                Err(ParserError::Decoding(ParserDecodingError::DataTooShort))
-            } else {
-                let fancy_out = vec![OutputCard {
-                    card: ParserCard::Text(String::new()),
-                    indent,
-                }];
-                let remaining_vector = Vec::new();
-                Ok(DecodedOut {
-                    remaining_vector,
-                    fancy_out,
-                })
-            }
         }
-    }
-}
-
-/// Function to decode `U256` and `I256`.
-/// Both `U256` and `I256` are always 32 byte element, so the needed length pre-determined.
-/// Note: both types are marked as non-existing in rust in scale-info.
-/// For decoding the elements, `le` functions from num_bigint crate are used.
-///
-/// The function decodes only `U256` or `I256` part, removes already decoded part of input data Vec<u8>,
-/// and returns whatever remains as DecodedOut field remaining_vector, which is processed later separately.
-///
-/// The function takes as arguments
-/// - data (remaining Vec<u8> of data),
-/// - boolean flag if the expected value is signed (signed corresponds to I256, unsigned corresponds to U256),
-/// - indent used for creating properly formatted output cards.
-///
-/// The function outputs the DecodedOut value in case of success.
-fn decode_big256(data: &[u8], signed: bool, indent: u32) -> Result<DecodedOut, ParserError> {
-    match data.get(0..32) {
-        Some(slice_to_big256) => {
-            let fancy_out = {
-                if signed {
-                    vec![OutputCard {
-                        card: ParserCard::Default(
-                            BigInt::from_signed_bytes_le(slice_to_big256).to_string(),
-                        ),
-                        indent,
-                    }]
-                }
-                // I256
-                else {
-                    vec![OutputCard {
-                        card: ParserCard::Default(
-                            BigUint::from_bytes_le(slice_to_big256).to_string(),
-                        ),
-                        indent,
-                    }]
-                } // U256
-            };
-            let remaining_vector = (data[32..]).to_vec();
-            Ok(DecodedOut {
-                remaining_vector,
-                fancy_out,
-            })
-        }
-        None => Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
+    } else if str_length != 0 {
+        Err(ParserError::Decoding(ParserDecodingError::DataTooShort))
+    } else {
+        let out = OutputCard {
+            card: ParserCard::Text(String::new()),
+            indent,
+        };
+        Ok(out)
     }
 }
 
@@ -314,6 +160,11 @@ fn decode_big256(data: &[u8], signed: bool, indent: u32) -> Result<DecodedOut, P
 enum SpecialType {
     AccountId,
     Call,
+    PerU16,
+    Percent,
+    Permill,
+    Perbill,
+    Perquintill,
     None,
 }
 
@@ -322,6 +173,11 @@ fn check_special(current_type: &Type<PortableForm>) -> SpecialType {
         Some(a) => match a.as_str() {
             "AccountId32" => SpecialType::AccountId,
             "Call" => SpecialType::Call,
+            "PerU16" => SpecialType::PerU16,
+            "Percent" => SpecialType::Percent,
+            "Permill" => SpecialType::Permill,
+            "Perbill" => SpecialType::Perbill,
+            "Perquintill" => SpecialType::Perquintill,
             _ => SpecialType::None,
         },
         None => SpecialType::None,
@@ -349,11 +205,10 @@ pub(crate) fn decoding_sci_complete(
     compact_flag: bool,
     balance_flag: bool,
     call_expectation: &CallExpectation,
-    data: Vec<u8>,
+    data: &mut Vec<u8>,
     meta_v14: &RuntimeMetadataV14,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
+) -> Result<Vec<OutputCard>, ParserError> {
     if let Some(ext) = possible_ext {
         ext.check_special(current_type)
     }
@@ -366,7 +221,30 @@ pub(crate) fn decoding_sci_complete(
         }
     };
     match special_type {
-        SpecialType::AccountId => special_case_account_id(data, indent, short_specs),
+        SpecialType::AccountId => {
+            let out = special_case_account_id(data, indent)?;
+            Ok(vec![out])
+        }
+        SpecialType::PerU16 => {
+            let out = PerU16::decode_checked(data, indent, compact_flag)?;
+            Ok(vec![out])
+        }
+        SpecialType::Percent => {
+            let out = Percent::decode_checked(data, indent, compact_flag)?;
+            Ok(vec![out])
+        }
+        SpecialType::Permill => {
+            let out = Permill::decode_checked(data, indent, compact_flag)?;
+            Ok(vec![out])
+        }
+        SpecialType::Perbill => {
+            let out = Perbill::decode_checked(data, indent, compact_flag)?;
+            Ok(vec![out])
+        }
+        SpecialType::Perquintill => {
+            let out = Perquintill::decode_checked(data, indent, compact_flag)?;
+            Ok(vec![out])
+        }
         _ => {
             if let Some(ext) = possible_ext {
                 if let SpecialExt::Era = ext.specialty {
@@ -388,7 +266,6 @@ pub(crate) fn decoding_sci_complete(
                     data,
                     meta_v14,
                     indent,
-                    short_specs,
                 ),
                 TypeDef::Variant(x) => {
                     reject_flags(compact_flag, balance_flag)?;
@@ -399,7 +276,6 @@ pub(crate) fn decoding_sci_complete(
                         data,
                         meta_v14,
                         indent,
-                        short_specs,
                     )
                 }
                 TypeDef::Sequence(x) => {
@@ -425,7 +301,6 @@ pub(crate) fn decoding_sci_complete(
                         data,
                         meta_v14,
                         indent,
-                        short_specs,
                     )
                 }
                 TypeDef::Array(x) => {
@@ -451,7 +326,7 @@ pub(crate) fn decoding_sci_complete(
                                 data,
                                 &mut ext.found_ext,
                                 indent,
-                                short_specs,
+                                ext.genesis_hash,
                                 hash,
                             );
                         }
@@ -478,7 +353,6 @@ pub(crate) fn decoding_sci_complete(
                         data,
                         meta_v14,
                         indent,
-                        short_specs,
                     )
                 }
                 TypeDef::Tuple(x) => {
@@ -495,18 +369,19 @@ pub(crate) fn decoding_sci_complete(
                         data,
                         meta_v14,
                         indent,
-                        short_specs,
                     )
                 }
-                TypeDef::Primitive(x) => decode_type_def_primitive(
-                    x,
-                    possible_ext,
-                    compact_flag,
-                    balance_flag,
-                    &data,
-                    indent,
-                    short_specs,
-                ),
+                TypeDef::Primitive(x) => {
+                    let primitive_card = decode_type_def_primitive(
+                        x,
+                        possible_ext,
+                        compact_flag,
+                        balance_flag,
+                        data,
+                        indent,
+                    )?;
+                    Ok(vec![primitive_card])
+                }
                 TypeDef::Compact(x) => {
                     let inner_type = match meta_v14.types.resolve(x.type_param().id()) {
                         // docs?
@@ -527,7 +402,6 @@ pub(crate) fn decoding_sci_complete(
                         data,
                         meta_v14,
                         indent,
-                        short_specs,
                     )
                 }
                 TypeDef::BitSequence(x) => {
@@ -539,12 +413,14 @@ pub(crate) fn decoding_sci_complete(
     }
 }
 
-pub(crate) fn decoding_sci_entry_point(
-    mut data: Vec<u8>,
+/*
+pub(crate) fn process_as_call(
+    data: &mut Vec<u8>,
+    pallet: String,
+    call_type: &Type<PortableForm>,
     meta_v14: &RuntimeMetadataV14,
     mut indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
+) -> Result<Call, ParserError> {
     let pallet_index: u8 = match data.get(0) {
         Some(x) => *x,
         None => return Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
@@ -579,16 +455,16 @@ pub(crate) fn decoding_sci_entry_point(
     };
     let (current_type, _, _) = type_path_docs(meta_v14, type_id)?;
 
-    let mut fancy_out = vec![OutputCard {
+    let mut out = vec![OutputCard {
         card: ParserCard::Pallet(pallet_name),
         indent,
     }];
     indent += 1;
-    data = data[1..].to_vec();
+    *data = data[1..].to_vec();
 
     let compact_flag = false;
     let balance_flag = false;
-    let decoded_out = decoding_sci_complete(
+    let out_addition = decoding_sci_complete(
         &current_type,
         &mut None,
         compact_flag,
@@ -597,14 +473,75 @@ pub(crate) fn decoding_sci_entry_point(
         data,
         meta_v14,
         indent,
-        short_specs,
     )?;
-    fancy_out.extend_from_slice(&decoded_out.fancy_out);
+    out.extend_from_slice(&out_addition);
 
-    Ok(DecodedOut {
-        remaining_vector: decoded_out.remaining_vector,
-        fancy_out,
-    })
+    Ok(out)
+}
+*/
+
+
+pub(crate) fn decoding_sci_entry_point(
+    data: &mut Vec<u8>,
+    meta_v14: &RuntimeMetadataV14,
+    mut indent: u32,
+) -> Result<Vec<OutputCard>, ParserError> {
+    let pallet_index: u8 = match data.get(0) {
+        Some(x) => *x,
+        None => return Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
+    };
+
+    let mut found_call_type: Option<u32> = None;
+    let mut found_pallet_name: Option<String> = None;
+    for x in meta_v14.pallets.iter() {
+        if x.index == pallet_index {
+            found_pallet_name = Some(x.name.to_string());
+            if let Some(a) = &x.calls {
+                found_call_type = Some(a.ty.id());
+            }
+            break;
+        }
+    }
+    let pallet_name = match found_pallet_name {
+        Some(a) => a,
+        None => {
+            return Err(ParserError::Decoding(ParserDecodingError::PalletNotFound(
+                pallet_index,
+            )))
+        }
+    };
+    let type_id = match found_call_type {
+        Some(a) => a,
+        None => {
+            return Err(ParserError::Decoding(ParserDecodingError::NoCallsInPallet(
+                pallet_name,
+            )))
+        }
+    };
+    let (current_type, _, _) = type_path_docs(meta_v14, type_id)?;
+
+    let mut out = vec![OutputCard {
+        card: ParserCard::Pallet(pallet_name),
+        indent,
+    }];
+    indent += 1;
+    *data = data[1..].to_vec();
+
+    let compact_flag = false;
+    let balance_flag = false;
+    let out_addition = decoding_sci_complete(
+        &current_type,
+        &mut None,
+        compact_flag,
+        balance_flag,
+        &CallExpectation::Pallet,
+        data,
+        meta_v14,
+        indent,
+    )?;
+    out.extend_from_slice(&out_addition);
+
+    Ok(out)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -613,51 +550,35 @@ fn decode_type_def_sequence(
     possible_ext: &mut Option<&mut Ext>,
     balance_flag: bool,
     call_expectation: &CallExpectation,
-    mut data: Vec<u8>,
+    data: &mut Vec<u8>,
     meta_v14: &RuntimeMetadataV14,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
-    let pre_vector = get_compact::<u32>(&data)?;
-    let mut fancy_output_prep: Vec<OutputCard> = Vec::new();
-    let elements_of_vector = pre_vector.compact_found;
-    match pre_vector.start_next_unit {
-        Some(start) => {
-            data = data[start..].to_vec();
-            for _i in 0..elements_of_vector {
-                let compact_flag = false;
-                let after_run = decoding_sci_complete(
-                    inner_type,
-                    possible_ext,
-                    compact_flag,
-                    balance_flag,
-                    call_expectation,
-                    data,
-                    meta_v14,
-                    indent,
-                    short_specs,
-                )?;
-                fancy_output_prep.extend_from_slice(&after_run.fancy_out);
-                data = after_run.remaining_vector;
-            }
-            Ok(DecodedOut {
-                remaining_vector: data,
-                fancy_out: fancy_output_prep,
-            })
+) -> Result<Vec<OutputCard>, ParserError> {
+    let elements_of_vector = get_compact::<u32>(data)?;
+    let mut out: Vec<OutputCard> = Vec::new();
+    if !data.is_empty() {
+        for _i in 0..elements_of_vector {
+            let compact_flag = false;
+            let out_addition = decoding_sci_complete(
+                inner_type,
+                possible_ext,
+                compact_flag,
+                balance_flag,
+                call_expectation,
+                data,
+                meta_v14,
+                indent,
+            )?;
+            out.extend_from_slice(&out_addition);
         }
-        None => {
-            if elements_of_vector != 0 {
-                Err(ParserError::Decoding(ParserDecodingError::DataTooShort))
-            } else {
-                Ok(DecodedOut {
-                    remaining_vector: Vec::new(),
-                    fancy_out: vec![OutputCard {
-                        card: ParserCard::Default(String::new()),
-                        indent,
-                    }],
-                })
-            }
-        }
+        Ok(out)
+    } else if elements_of_vector != 0 {
+        Err(ParserError::Decoding(ParserDecodingError::DataTooShort))
+    } else {
+        Ok(vec![OutputCard {
+            card: ParserCard::Default(String::new()),
+            indent,
+        }])
     }
 }
 
@@ -667,15 +588,14 @@ fn decode_type_def_array(
     len: u32,
     possible_ext: &mut Option<&mut Ext>,
     balance_flag: bool,
-    mut data: Vec<u8>,
+    data: &mut Vec<u8>,
     meta_v14: &RuntimeMetadataV14,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
-    let mut fancy_out: Vec<OutputCard> = Vec::new();
+) -> Result<Vec<OutputCard>, ParserError> {
+    let mut out: Vec<OutputCard> = Vec::new();
     for _i in 0..len {
         let compact_flag = false;
-        let after_run = decoding_sci_complete(
+        let out_addition = decoding_sci_complete(
             inner_type,
             possible_ext,
             compact_flag,
@@ -684,30 +604,24 @@ fn decode_type_def_array(
             data,
             meta_v14,
             indent,
-            short_specs,
         )?;
-        fancy_out.extend_from_slice(&after_run.fancy_out);
-        data = after_run.remaining_vector;
+        out.extend_from_slice(&out_addition);
     }
-    Ok(DecodedOut {
-        remaining_vector: data,
-        fancy_out,
-    })
+    Ok(out)
 }
 
 fn decode_type_def_tuple(
     id_set: Vec<u32>,
     possible_ext: &mut Option<&mut Ext>,
     balance_flag: bool,
-    mut data: Vec<u8>,
+    data: &mut Vec<u8>,
     meta_v14: &RuntimeMetadataV14,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
-    let mut fancy_out: Vec<OutputCard> = Vec::new();
+) -> Result<Vec<OutputCard>, ParserError> {
+    let mut out: Vec<OutputCard> = Vec::new();
     for (i, type_id) in id_set.iter().enumerate() {
         let (inner_type, path, docs) = type_path_docs(meta_v14, *type_id)?;
-        fancy_out.push(OutputCard {
+        out.push(OutputCard {
             card: ParserCard::FieldNumber {
                 number: i + 1,
                 docs_field_number: String::new(),
@@ -717,7 +631,7 @@ fn decode_type_def_tuple(
             indent,
         });
         let compact_flag = false;
-        let after_run = decoding_sci_complete(
+        let out_addition = decoding_sci_complete(
             &inner_type,
             possible_ext,
             compact_flag,
@@ -726,15 +640,10 @@ fn decode_type_def_tuple(
             data,
             meta_v14,
             indent,
-            short_specs,
         )?;
-        fancy_out.extend_from_slice(&after_run.fancy_out);
-        data = after_run.remaining_vector;
+        out.extend_from_slice(&out_addition);
     }
-    Ok(DecodedOut {
-        remaining_vector: data,
-        fancy_out,
-    })
+    Ok(out)
 }
 
 struct IsOptionBool {
@@ -787,11 +696,10 @@ fn decode_type_def_variant(
     found_ty: &TypeDefVariant<PortableForm>,
     possible_ext: &mut Option<&mut Ext>,
     call_expectation: &CallExpectation,
-    mut data: Vec<u8>,
+    data: &mut Vec<u8>,
     meta_v14: &RuntimeMetadataV14,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
+) -> Result<Vec<OutputCard>, ParserError> {
     let enum_index = match data.get(0) {
         Some(x) => *x,
         None => return Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
@@ -800,17 +708,17 @@ fn decode_type_def_variant(
     let check = is_option_bool(found_ty, meta_v14);
     if check.is_option {
         if check.is_bool {
-            let fancy_out = match enum_index {
+            let out = match enum_index {
                 0 => vec![OutputCard {
                     card: ParserCard::None,
                     indent,
                 }],
                 1 => vec![OutputCard {
-                    card: ParserCard::Default(String::from("True")),
+                    card: ParserCard::PrimitiveBool(true),
                     indent,
                 }],
                 2 => vec![OutputCard {
-                    card: ParserCard::Default(String::from("False")),
+                    card: ParserCard::PrimitiveBool(false),
                     indent,
                 }],
                 _ => {
@@ -819,29 +727,23 @@ fn decode_type_def_variant(
                     ))
                 }
             };
-            let remaining_vector = data[1..].to_vec();
-            Ok(DecodedOut {
-                remaining_vector,
-                fancy_out,
-            })
+            *data = data[1..].to_vec();
+            Ok(out)
         } else {
             match enum_index {
                 0 => {
-                    let fancy_out = vec![OutputCard {
+                    let out = vec![OutputCard {
                         card: ParserCard::None,
                         indent,
                     }];
-                    let remaining_vector = data[1..].to_vec();
-                    Ok(DecodedOut {
-                        remaining_vector,
-                        fancy_out,
-                    })
+                    *data = data[1..].to_vec();
+                    Ok(out)
                 }
                 1 => {
                     if data.len() == 1 {
                         return Err(ParserError::Decoding(ParserDecodingError::DataTooShort));
                     }
-                    data = data[1..].to_vec();
+                    *data = data[1..].to_vec();
                     let found_variant = &found_ty.variants()[1];
                     let compact_flag = false;
                     let balance_flag = false;
@@ -854,7 +756,6 @@ fn decode_type_def_variant(
                         data,
                         meta_v14,
                         indent,
-                        short_specs,
                     )
                 }
                 _ => Err(ParserError::Decoding(
@@ -885,7 +786,7 @@ fn decode_type_def_variant(
             }
             variant_docs.push_str(x);
         }
-        let mut fancy_out = match call_expectation {
+        let mut out = match call_expectation {
             CallExpectation::None => vec![OutputCard {
                 card: ParserCard::EnumVariantName {
                     name: found_variant.name().to_string(),
@@ -905,11 +806,11 @@ fn decode_type_def_variant(
                 indent,
             }],
         };
-        data = data[1..].to_vec();
+        *data = data[1..].to_vec();
 
         let compact_flag = false;
         let balance_flag = false;
-        let fields_processed = process_fields(
+        let out_addition = process_fields(
             found_variant.fields(),
             possible_ext,
             call_expectation,
@@ -918,15 +819,10 @@ fn decode_type_def_variant(
             data,
             meta_v14,
             indent + 1,
-            short_specs,
         )?;
-        fancy_out.extend_from_slice(&fields_processed.fancy_out);
-        data = fields_processed.remaining_vector;
+        out.extend_from_slice(&out_addition);
 
-        Ok(DecodedOut {
-            remaining_vector: data,
-            fancy_out,
-        })
+        Ok(out)
     }
 }
 
@@ -937,14 +833,13 @@ fn process_fields(
     call_expectation: &CallExpectation,
     compact_flag: bool,
     mut balance_flag: bool,
-    mut data: Vec<u8>,
+    data: &mut Vec<u8>,
     meta_v14: &RuntimeMetadataV14,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
+) -> Result<Vec<OutputCard>, ParserError> {
     let mut indent_skipped = false;
     let mut field_is_str = false;
-    let mut fancy_out: Vec<OutputCard> = Vec::new();
+    let mut out: Vec<OutputCard> = Vec::new();
     for (i, x) in fields.iter().enumerate() {
         let mut field_docs = String::new();
         for (j, y) in x.docs().iter().enumerate() {
@@ -956,7 +851,7 @@ fn process_fields(
         let (inner_type, path_type, docs_type) = type_path_docs(meta_v14, x.ty().id())?;
         match x.name() {
             Some(field_name) => {
-                fancy_out.push(OutputCard {
+                out.push(OutputCard {
                     card: ParserCard::FieldName {
                         name: field_name.to_string(),
                         docs_field_name: field_docs,
@@ -971,7 +866,7 @@ fn process_fields(
             }
             None => {
                 if fields.len() > 1 {
-                    fancy_out.push(OutputCard {
+                    out.push(OutputCard {
                         card: ParserCard::FieldNumber {
                             number: i,
                             docs_field_number: field_docs,
@@ -996,9 +891,10 @@ fn process_fields(
                 indent + 1
             }
         };
-        let after_run = {
+        let out_addition = {
             if field_is_str {
-                decode_str(&data, indent)?
+                let str_card = decode_str(data, indent)?;
+                vec![str_card]
             } else {
                 decoding_sci_complete(
                     &inner_type,
@@ -1009,17 +905,12 @@ fn process_fields(
                     data,
                     meta_v14,
                     indent,
-                    short_specs,
                 )?
             }
         };
-        fancy_out.extend_from_slice(&after_run.fancy_out);
-        data = after_run.remaining_vector;
+        out.extend_from_slice(&out_addition);
     }
-    Ok(DecodedOut {
-        remaining_vector: data,
-        fancy_out,
-    })
+    Ok(out)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1028,11 +919,10 @@ fn decode_type_def_composite(
     possible_ext: &mut Option<&mut Ext>,
     compact_flag: bool,
     balance_flag: bool,
-    data: Vec<u8>,
+    data: &mut Vec<u8>,
     meta_v14: &RuntimeMetadataV14,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
+) -> Result<Vec<OutputCard>, ParserError> {
     if compact_flag && (composite_ty.fields().len() > 1) {
         return Err(ParserError::Decoding(
             ParserDecodingError::UnexpectedCompactInsides,
@@ -1047,105 +937,87 @@ fn decode_type_def_composite(
         data,
         meta_v14,
         indent,
-        short_specs,
     )
 }
 
 fn decode_type_def_bit_sequence(
     bit_ty: &TypeDefBitSequence<PortableForm>,
-    data: Vec<u8>,
+    data: &mut Vec<u8>,
     meta_v14: &RuntimeMetadataV14,
     indent: u32,
-) -> Result<DecodedOut, ParserError> {
-    let pre_bitvec = get_compact::<u32>(&data)?;
-    let actual_length = match pre_bitvec.compact_found % 8 {
-        0 => (pre_bitvec.compact_found / 8),
-        _ => (pre_bitvec.compact_found / 8) + 1,
-    };
-    match pre_bitvec.start_next_unit {
-        Some(start) => {
-            let fin = start + (actual_length as usize);
-            let into_bv_decode = match data.get(..fin) {
-                Some(a) => a.to_vec(),
-                None => return Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
-            };
-            let bitorder_type_id = bit_ty.bit_order_type().id();
-            let bitorder_type = match meta_v14.types.resolve(bitorder_type_id) {
-                Some(a) => a,
-                None => {
-                    return Err(ParserError::Decoding(
-                        ParserDecodingError::V14TypeNotResolved,
-                    ))
-                }
-            };
-            let bitorder = match bitorder_type.type_def() {
-                TypeDef::Composite(_) => match bitorder_type.path().ident() {
-                    Some(x) => match x.as_str() {
-                        "Lsb0" => FoundBitOrder::Lsb0,
-                        "Msb0" => FoundBitOrder::Msb0,
-                        _ => {
-                            return Err(ParserError::Decoding(ParserDecodingError::NotBitOrderType))
-                        }
-                    },
-                    None => {
-                        return Err(ParserError::Decoding(ParserDecodingError::NotBitOrderType))
-                    }
-                },
-                _ => return Err(ParserError::Decoding(ParserDecodingError::NotBitOrderType)),
-            };
-
-            let bitstore_type_id = bit_ty.bit_store_type().id();
-            let bitstore_type = match meta_v14.types.resolve(bitstore_type_id) {
-                Some(a) => a,
-                None => {
-                    return Err(ParserError::Decoding(
-                        ParserDecodingError::V14TypeNotResolved,
-                    ))
-                }
-            };
-            let card_prep = match bitstore_type.type_def() {
-                TypeDef::Primitive(a) => {
-                    match a {
-                        TypeDefPrimitive::U8 => process_bitvec::<u8>(bitorder, into_bv_decode)?,
-                        TypeDefPrimitive::U16 => process_bitvec::<u16>(bitorder, into_bv_decode)?,
-                        TypeDefPrimitive::U32 => process_bitvec::<u32>(bitorder, into_bv_decode)?,
-                        // this should not be here, but due to possible architecture limitations u64 will not compile on 32-bit architectures
-                        // ideally, should be patched by `#[repr(C, align(8))]` thing similar to bitvec issue 76
-                        // TypeDefPrimitive::U64 => process_bitvec::<u64> (bitorder, into_bv_decode)?,
-                        TypeDefPrimitive::U64 => match bitorder {
-                            FoundBitOrder::Lsb0 => ugly_patch_u64::<Lsb0>(into_bv_decode)?,
-                            FoundBitOrder::Msb0 => ugly_patch_u64::<Msb0>(into_bv_decode)?,
-                        },
-                        _ => {
-                            return Err(ParserError::Decoding(ParserDecodingError::NotBitStoreType))
-                        }
-                    }
-                }
-                _ => return Err(ParserError::Decoding(ParserDecodingError::NotBitStoreType)),
-            };
-
-            let fancy_out = vec![OutputCard {
-                card: ParserCard::BitVec(card_prep),
-                indent,
-            }];
-            let remaining_vector = data[fin..].to_vec();
-            Ok(DecodedOut {
-                remaining_vector,
-                fancy_out,
-            })
-        }
-        None => {
-            if actual_length != 0 {
-                return Err(ParserError::Decoding(ParserDecodingError::DataTooShort));
+) -> Result<Vec<OutputCard>, ParserError> {
+    let compact_found = get_compact::<u32>(data)?;
+    let actual_length = match compact_found % 8 {
+        0 => (compact_found / 8),
+        _ => (compact_found / 8) + 1,
+    } as usize;
+    if !data.is_empty() {
+        let into_bv_decode = match data.get(..actual_length) {
+            Some(a) => a.to_vec(),
+            None => return Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
+        };
+        let bitorder_type_id = bit_ty.bit_order_type().id();
+        let bitorder_type = match meta_v14.types.resolve(bitorder_type_id) {
+            Some(a) => a,
+            None => {
+                return Err(ParserError::Decoding(
+                    ParserDecodingError::V14TypeNotResolved,
+                ))
             }
-            Ok(DecodedOut {
-                remaining_vector: Vec::new(),
-                fancy_out: vec![OutputCard {
-                    card: ParserCard::Default(String::new()),
-                    indent,
-                }],
-            })
-        }
+        };
+        let bitorder = match bitorder_type.type_def() {
+            TypeDef::Composite(_) => match bitorder_type.path().ident() {
+                Some(x) => match x.as_str() {
+                    "Lsb0" => FoundBitOrder::Lsb0,
+                    "Msb0" => FoundBitOrder::Msb0,
+                    _ => return Err(ParserError::Decoding(ParserDecodingError::NotBitOrderType)),
+                },
+                None => return Err(ParserError::Decoding(ParserDecodingError::NotBitOrderType)),
+            },
+            _ => return Err(ParserError::Decoding(ParserDecodingError::NotBitOrderType)),
+        };
+
+        let bitstore_type_id = bit_ty.bit_store_type().id();
+        let bitstore_type = match meta_v14.types.resolve(bitstore_type_id) {
+            Some(a) => a,
+            None => {
+                return Err(ParserError::Decoding(
+                    ParserDecodingError::V14TypeNotResolved,
+                ))
+            }
+        };
+        let card_prep = match bitstore_type.type_def() {
+            TypeDef::Primitive(a) => {
+                match a {
+                    TypeDefPrimitive::U8 => process_bitvec::<u8>(bitorder, into_bv_decode)?,
+                    TypeDefPrimitive::U16 => process_bitvec::<u16>(bitorder, into_bv_decode)?,
+                    TypeDefPrimitive::U32 => process_bitvec::<u32>(bitorder, into_bv_decode)?,
+                    // this should not be here, but due to possible architecture limitations u64 will not compile on 32-bit architectures
+                    // ideally, should be patched by `#[repr(C, align(8))]` thing similar to bitvec issue 76
+                    // TypeDefPrimitive::U64 => process_bitvec::<u64> (bitorder, into_bv_decode)?,
+                    TypeDefPrimitive::U64 => match bitorder {
+                        FoundBitOrder::Lsb0 => ugly_patch_u64::<Lsb0>(into_bv_decode)?,
+                        FoundBitOrder::Msb0 => ugly_patch_u64::<Msb0>(into_bv_decode)?,
+                    },
+                    _ => return Err(ParserError::Decoding(ParserDecodingError::NotBitStoreType)),
+                }
+            }
+            _ => return Err(ParserError::Decoding(ParserDecodingError::NotBitStoreType)),
+        };
+
+        let out = vec![OutputCard {
+            card: ParserCard::BitVec(card_prep),
+            indent,
+        }];
+        *data = data[actual_length..].to_vec();
+        Ok(out)
+    } else if actual_length != 0 {
+        Err(ParserError::Decoding(ParserDecodingError::DataTooShort))
+    } else {
+        Ok(vec![OutputCard {
+            card: ParserCard::BitVec(String::new()),
+            indent,
+        }])
     }
 }
 
@@ -1178,12 +1050,11 @@ fn ugly_patch_u64<O: BitOrder>(into_bv_decode: Vec<u8>) -> Result<String, Parser
         }
         let print1 = BitVec::<u32, O>::from_vec(vec![vec[2 * i]]).to_string();
         let print2 = BitVec::<u32, O>::from_vec(vec![vec[2 * i + 1]]).to_string();
-        let _ = write!(
-            out,
+        out.push_str(&format!(
             "{}{}",
             &print1[1..print1.len() - 1],
             &print2[1..print2.len() - 1]
-        );
+        ));
     }
     out.push(']');
     Ok(out)

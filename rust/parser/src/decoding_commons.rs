@@ -1,25 +1,16 @@
+//! Decoder elements common for all metadata versions
+//!
+use num_bigint::{BigInt, BigUint};
 use parity_scale_codec::{Compact, Decode, HasCompact};
-use sp_arithmetic::PerThing;
+use sp_arithmetic::{PerU16, Perbill, Percent, Permill, Perquintill};
 use sp_core::crypto::AccountId32;
 use std::{convert::TryInto, mem::size_of};
 
-use definitions::{
-    error_signer::{ParserDecodingError, ParserError, ParserMetadataError},
-    network_specs::ShortSpecs,
-};
-use printing_balance::convert_balance_pretty;
+use definitions::error_signer::{ParserDecodingError, ParserError, ParserMetadataError};
+use printing_balance::AsBalance;
 
-use crate::cards::ParserCard;
+use crate::cards::{ParserCard, Specialty};
 use crate::decoding_sci_ext::{Ext, SpecialExt};
-
-/// Struct to store the decoded data, used for data storage between decoding iterations.
-/// decoded_string is short json-like format,
-/// fancy_out is format used for js output cards (the one really going out at this point)
-/// and remaining vector contains the input data not yet used after the last decoding iteration.
-pub(crate) struct DecodedOut {
-    pub(crate) remaining_vector: Vec<u8>,
-    pub(crate) fancy_out: Vec<OutputCard>,
-}
 
 #[derive(Clone)]
 pub struct OutputCard {
@@ -34,9 +25,7 @@ pub struct CutCompact<T: HasCompact> {
     pub start_next_unit: Option<usize>,
 }
 
-/// Function to search &[u8] for shortest compact <T> by brute force.
-/// Outputs CutCompact value in case of success.
-pub fn get_compact<T>(data: &[u8]) -> Result<CutCompact<T>, ParserError>
+pub fn cut_compact<T>(data: &[u8]) -> Result<CutCompact<T>, ParserError>
 where
     T: HasCompact,
     Compact<T>: Decode,
@@ -45,14 +34,17 @@ where
         return Err(ParserError::Decoding(ParserDecodingError::DataTooShort));
     }
     let mut out = None;
-    for i in 1..data.len() + 1 {
-        let mut hippo = &data[..i];
+    for i in 0..data.len() {
+        let mut hippo = &data[..=i];
         let unhippo = <Compact<T>>::decode(&mut hippo);
         if let Ok(hurray) = unhippo {
-            let mut start_next_unit = None;
-            if data.len() > i {
-                start_next_unit = Some(i);
-            }
+            let start_next_unit = {
+                if data.len() == i {
+                    None
+                } else {
+                    Some(i + 1)
+                }
+            };
             out = Some(CutCompact {
                 compact_found: hurray.0,
                 start_next_unit,
@@ -66,283 +58,239 @@ where
     }
 }
 
-/// Function to decode types with trait PerThing (Percent, Permill, Perbill etc).
-/// Decoding type T either as compact or as fixed length type.
-/// Used only in decoding_older module, without serde.
-///
-/// The function decodes only this element, removes already decoded part of input data Vec<u8>,
-/// and returns whatever remains as DecodedOut field remaining_vector, which is processed later separately.
-///
-/// The function takes as arguments
-/// - data (remaining Vec<u8> of data),
-/// - compact flag to initiate compact decoding,
-/// - &str name of type to be displayed in case of error,
-/// - indent used for creating properly formatted js cards,
-///
-/// The function outputs the DecodedOut value in case of success.
-pub(crate) fn decode_perthing<T>(
-    data: &[u8],
-    compact_flag: bool,
-    found_ty: &str,
-    indent: u32,
-) -> Result<DecodedOut, ParserError>
+/// Function to search &[u8] for shortest compact <T> by brute force.
+/// Outputs CutCompact value in case of success.
+pub(crate) fn get_compact<T>(data: &mut Vec<u8>) -> Result<T, ParserError>
 where
-    T: PerThing + Decode + HasCompact,
+    T: HasCompact,
     Compact<T>: Decode,
 {
-    let (fancy_out, remaining_vector) = {
-        if compact_flag {
-            let compact_found = get_compact::<T>(data)?;
-            let fancy_out = vec![OutputCard {
-                card: ParserCard::Default(
-                    compact_found.compact_found.deconstruct().into().to_string(),
-                ),
-                indent,
-            }];
-            let remaining_vector = match compact_found.start_next_unit {
-                Some(x) => (data[x..]).to_vec(),
-                None => Vec::new(),
-            };
-            (fancy_out, remaining_vector)
-        } else {
-            let length = size_of::<T>();
-            if data.len() < length {
-                return Err(ParserError::Decoding(ParserDecodingError::DataTooShort));
-            }
-            let decoded_data = <T>::decode(&mut &data[..length]);
-            match decoded_data {
-                Ok(x) => {
-                    let fancy_out = vec![OutputCard {
-                        card: ParserCard::Default(x.deconstruct().into().to_string()),
-                        indent,
-                    }];
-                    let remaining_vector = data[length..].to_vec();
-                    (fancy_out, remaining_vector)
-                }
-                Err(_) => {
-                    return Err(ParserError::Decoding(
-                        ParserDecodingError::PrimitiveFailure(found_ty.to_string()),
-                    ))
-                }
-            }
-        }
+    let cut_compact = cut_compact::<T>(data)?;
+    *data = match cut_compact.start_next_unit {
+        Some(start) => data[start..].to_vec(),
+        None => Vec::new(),
     };
-    Ok(DecodedOut {
-        remaining_vector,
-        fancy_out,
-    })
+    Ok(cut_compact.compact_found)
 }
 
-/// Function to decode a displayable type of known length (i.e. length stable with respect to mem::size_of).
-/// Used in both decoding_older and decoding_sci, for types not compatible with compact or balance printing
-///
-/// The function decodes only this type, removes already decoded part of input data Vec<u8>,
-/// and returns whatever remains as DecodedOut field remaining_vector, which is processed later separately.
-///
-/// The function takes as arguments
-/// - data (remaining Vec<u8> of data),
-/// - found_ty: name of the type found,
-/// - indent used for creating properly formatted js cards.
-///
-/// The function outputs the DecodedOut value in case of success.
-pub(crate) fn decode_known_length<T: Decode + std::fmt::Display>(
-    data: &[u8],
-    found_ty: &str,
-    indent: u32,
-) -> Result<DecodedOut, ParserError> {
-    let length = size_of::<T>();
-    if data.len() < length {
-        return Err(ParserError::Decoding(ParserDecodingError::DataTooShort));
-    }
-    let decoded_data = <T>::decode(&mut &data[..length]);
-    match decoded_data {
-        Ok(x) => {
-            let fancy_out = vec![OutputCard {
-                card: ParserCard::Default(x.to_string()),
-                indent,
-            }];
-            let remaining_vector = data[length..].to_vec();
-            Ok(DecodedOut {
-                remaining_vector,
-                fancy_out,
-            })
-        }
-        Err(_) => Err(ParserError::Decoding(
-            ParserDecodingError::PrimitiveFailure(found_ty.to_string()),
-        )),
-    }
+pub(crate) trait StLen: Sized {
+    fn decode_value(data: &mut Vec<u8>) -> Result<Self, ParserError>;
 }
 
-/// Function to decode a displayable type compatible with compact and balance printing.
-/// Used in both decoding_older and decoding_sci.
-/// Decoding type T either as compact or as fixed length type, possibly as a balance.
-///
-/// The function decodes only this element, removes already decoded part of input data Vec<u8>,
-/// and returns whatever remains as DecodedOut field remaining_vector, which is processed later separately.
-///
-/// The function takes as arguments
-/// - data (remaining Vec<u8> of data),
-/// - compact flag and balance flag to choose decoding variant,
-/// - &str name of type to be displayed in case of error,
-/// - indent used for creating properly formatted js cards,
-/// - ShortSpecs to format the balance properly if the balance is involved.
-///
-/// The function outputs the DecodedOut value in case of success.
-pub(crate) fn decode_primitive_with_flags<T>(
-    data: &[u8],
-    possible_ext: &mut Option<&mut Ext>,
-    compact_flag: bool,
-    balance_flag: bool,
-    found_ty: &str,
-    indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError>
-where
-    T: Decode + HasCompact + std::fmt::Display,
-    Compact<T>: Decode,
-{
-    let balance_flag = {
-        if let Some(ext) = possible_ext {
-            if let SpecialExt::Tip = ext.specialty {
-                true
-            } else {
-                balance_flag
-            }
-        } else {
-            balance_flag
-        }
-    };
-    if compact_flag {
-        let compact_found = get_compact::<T>(data)?;
-        let fancy_out = {
-            if balance_flag {
-                process_balance(
-                    &compact_found.compact_found.to_string(),
-                    possible_ext,
-                    indent,
-                    short_specs,
-                )?
-            } else {
-                process_number(
-                    compact_found.compact_found.to_string(),
-                    possible_ext,
-                    indent,
-                    short_specs,
-                )?
-            }
-        };
-        let remaining_vector = match compact_found.start_next_unit {
-            Some(x) => (data[x..]).to_vec(),
-            None => Vec::new(),
-        };
-        Ok(DecodedOut {
-            remaining_vector,
-            fancy_out,
-        })
-    } else {
-        let length = size_of::<T>();
-        if data.len() < length {
-            return Err(ParserError::Decoding(ParserDecodingError::DataTooShort));
-        }
-        let decoded_data = <T>::decode(&mut &data[..length]);
-        match decoded_data {
-            Ok(x) => {
-                let fancy_out = {
-                    if balance_flag {
-                        process_balance(&x.to_string(), possible_ext, indent, short_specs)?
-                    } else {
-                        process_number(x.to_string(), possible_ext, indent, short_specs)?
+macro_rules! impl_stable_length_decodable {
+    ($($ty: ty), *) => {
+        $(
+            impl StLen for $ty {
+                fn decode_value(data: &mut Vec<u8>) -> Result<Self, ParserError> {
+                    let length = size_of::<Self>();
+                    match data.get(..length) {
+                        Some(slice_to_decode) => {
+                            let out = <Self>::decode(&mut &slice_to_decode[..])
+                                .map_err(|_| ParserError::Decoding(ParserDecodingError::PrimitiveFailure(stringify!($ty))))?;
+                            *data = data[length..].to_vec();
+                            Ok(out)
+                        },
+                        None => Err(ParserError::Decoding(ParserDecodingError::DataTooShort))
                     }
-                };
-                let remaining_vector = data[length..].to_vec();
-                Ok(DecodedOut {
-                    remaining_vector,
-                    fancy_out,
-                })
+                }
             }
-            Err(_) => Err(ParserError::Decoding(
-                ParserDecodingError::PrimitiveFailure(found_ty.to_string()),
-            )),
+        )*
+    }
+}
+
+impl_stable_length_decodable!(
+    bool,
+    i8,
+    i16,
+    i32,
+    i64,
+    i128,
+    u8,
+    u16,
+    u32,
+    u64,
+    u128,
+    PerU16,
+    Percent,
+    Permill,
+    Perbill,
+    Perquintill
+);
+
+macro_rules! impl_stable_length_big {
+    ($($big: ty, $get: ident), *) => {
+        $(
+            impl StLen for $big {
+                fn decode_value(data: &mut Vec<u8>) -> Result<Self, ParserError> {
+                    match data.get(0..32) {
+                        Some(slice_to_big256) => {
+                            let out = Self::$get(slice_to_big256);
+                            *data = data[32..].to_vec();
+                            Ok(out)
+                        },
+                        None => Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
+                    }
+                }
+            }
+        )*
+    }
+}
+
+impl_stable_length_big!(BigUint, from_bytes_le);
+impl_stable_length_big!(BigInt, from_signed_bytes_le);
+
+impl StLen for char {
+    fn decode_value(data: &mut Vec<u8>) -> Result<Self, ParserError> {
+        match data.get(0..4) {
+            Some(slice_to_char) => match char::from_u32(<u32>::from_le_bytes(
+                slice_to_char
+                    .try_into()
+                    .expect("contstant length, always fit"),
+            )) {
+                Some(ch) => {
+                    *data = data[4..].to_vec();
+                    Ok(ch)
+                }
+                None => Err(ParserError::Decoding(
+                    ParserDecodingError::PrimitiveFailure("char"),
+                )),
+            },
+            None => Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
         }
     }
 }
 
-fn process_balance(
-    balance: &str,
-    possible_ext: &mut Option<&mut Ext>,
-    indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<Vec<OutputCard>, ParserError> {
-    let balance_output = convert_balance_pretty(balance, short_specs.decimals, &short_specs.unit);
-    let out_balance = vec![OutputCard {
-        card: ParserCard::Balance {
-            number: balance_output.number.to_string(),
-            units: balance_output.units.to_string(),
-        },
-        indent,
-    }];
-    let out_tip = vec![OutputCard {
-        card: ParserCard::Tip {
-            number: balance_output.number.to_string(),
-            units: balance_output.units,
-        },
-        indent,
-    }];
-    if let Some(ext) = possible_ext {
-        if let SpecialExt::Tip = ext.specialty {
-            Ok(out_tip)
-        } else {
-            Ok(out_balance)
-        }
-    } else {
-        Ok(out_balance)
+pub(crate) trait StLenCheckSpecialtyCompact:
+    StLen + AsBalance + HasCompact + std::fmt::Display
+{
+    fn decode_checked(
+        data: &mut Vec<u8>,
+        indent: u32,
+        possible_ext: &mut Option<&mut Ext>,
+        balance_flag: bool,
+        compact_flag: bool,
+    ) -> Result<OutputCard, ParserError>;
+    fn default_card_name() -> &'static str;
+}
+
+macro_rules! impl_check_specialty_compact {
+    ($($ty: ty, $enum_variant: ident), *) => {
+        $(
+            impl StLenCheckSpecialtyCompact for $ty {
+                fn decode_checked(data: &mut Vec<u8>, indent: u32, possible_ext: &mut Option<&mut Ext>, balance_flag: bool, compact_flag: bool) -> Result<OutputCard, ParserError> {
+                    let specialty = specialty(possible_ext, balance_flag);
+                    let value = {
+                        if compact_flag {get_compact::<Self>(data)?}
+                        else {<Self>::decode_value(data)?}
+                    };
+                    if let Some(ext) = possible_ext {
+                        if let SpecialExt::SpecVersion = ext.specialty {
+                            ext.found_ext.network_version_printed = match ext.found_ext.network_version_printed {
+                                Some(_) => {
+                                    return Err(ParserError::FundamentallyBadV14Metadata(
+                                        ParserMetadataError::SpecVersionTwice,
+                                    ))
+                                }
+                                None => Some(value.to_string()),
+                            };
+                        }
+                    }
+                    Ok(OutputCard {
+                        card: ParserCard::$enum_variant{value, specialty},
+                        indent,
+                    })
+                }
+                fn default_card_name() -> &'static str {
+                    stringify!($ty)
+                }
+            }
+        )*
     }
 }
 
-fn process_number(
-    number: String,
-    possible_ext: &mut Option<&mut Ext>,
-    indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<Vec<OutputCard>, ParserError> {
+impl_check_specialty_compact!(u8, PrimitiveU8);
+impl_check_specialty_compact!(u16, PrimitiveU16);
+impl_check_specialty_compact!(u32, PrimitiveU32);
+impl_check_specialty_compact!(u64, PrimitiveU64);
+impl_check_specialty_compact!(u128, PrimitiveU128);
+
+pub(crate) trait StLenCheckCompact: StLen {
+    fn decode_checked(
+        data: &mut Vec<u8>,
+        indent: u32,
+        compact_flag: bool,
+    ) -> Result<OutputCard, ParserError>;
+}
+
+macro_rules! impl_allow_compact {
+    ($($ty: ty, $enum_variant: ident), *) => {
+        $(
+            impl StLenCheckCompact for $ty where $ty: HasCompact {
+                fn decode_checked(data: &mut Vec<u8>, indent: u32, compact_flag: bool) -> Result<OutputCard, ParserError> {
+                    let value = {
+                        if compact_flag {get_compact::<Self>(data)?}
+                        else {<Self>::decode_value(data)?}
+                    };
+                    Ok(OutputCard {
+                        card: ParserCard::$enum_variant(value),
+                        indent,
+                    })
+                }
+            }
+        )*
+    }
+}
+
+impl_allow_compact!(PerU16, PerU16);
+impl_allow_compact!(Percent, Percent);
+impl_allow_compact!(Permill, Permill);
+impl_allow_compact!(Perbill, Perbill);
+impl_allow_compact!(Perquintill, Perquintill);
+
+macro_rules! impl_block_compact {
+    ($($ty: ty, $enum_variant: ident), *) => {
+        $(
+            impl StLenCheckCompact for $ty {
+                fn decode_checked(data: &mut Vec<u8>, indent: u32, compact_flag: bool) -> Result<OutputCard, ParserError> {
+                    let value = {
+                        if compact_flag {return Err(ParserError::Decoding(
+                            ParserDecodingError::UnexpectedCompactInsides,
+                        ))}
+                        else {<Self>::decode_value(data)?}
+                    };
+                    Ok(OutputCard {
+                        card: ParserCard::$enum_variant(value),
+                        indent,
+                    })
+                }
+            }
+        )*
+    }
+}
+
+impl_block_compact!(bool, PrimitiveBool);
+impl_block_compact!(char, PrimitiveChar);
+impl_block_compact!(i8, PrimitiveI8);
+impl_block_compact!(i16, PrimitiveI16);
+impl_block_compact!(i32, PrimitiveI32);
+impl_block_compact!(i64, PrimitiveI64);
+impl_block_compact!(i128, PrimitiveI128);
+impl_block_compact!(BigInt, PrimitiveI256);
+impl_block_compact!(BigUint, PrimitiveU256);
+
+pub(crate) fn specialty(possible_ext: &mut Option<&mut Ext>, balance_flag: bool) -> Specialty {
     if let Some(ext) = possible_ext {
         match ext.specialty {
-            SpecialExt::Nonce => Ok(vec![OutputCard {
-                card: ParserCard::Nonce(number),
-                indent,
-            }]),
-            SpecialExt::SpecVersion => {
-                ext.found_ext.network_version_printed = match ext.found_ext.network_version_printed
-                {
-                    Some(_) => {
-                        return Err(ParserError::FundamentallyBadV14Metadata(
-                            ParserMetadataError::SpecVersionTwice,
-                        ))
-                    }
-                    None => Some(number.to_string()),
-                };
-                Ok(vec![OutputCard {
-                    card: ParserCard::NetworkNameVersion {
-                        name: short_specs.name.to_string(),
-                        version: number,
-                    },
-                    indent,
-                }])
-            }
-            SpecialExt::TxVersion => Ok(vec![OutputCard {
-                card: ParserCard::TxVersion(number),
-                indent,
-            }]),
-            _ => Ok(vec![OutputCard {
-                card: ParserCard::Default(number),
-                indent,
-            }]),
+            SpecialExt::Nonce => Specialty::Nonce,
+            SpecialExt::SpecVersion => Specialty::SpecVersion,
+            SpecialExt::Tip => Specialty::Tip,
+            SpecialExt::TxVersion => Specialty::TxVersion,
+            _ => Specialty::None,
         }
+    } else if balance_flag {
+        Specialty::Balance
     } else {
-        Ok(vec![OutputCard {
-            card: ParserCard::Default(number),
-            indent,
-        }])
+        Specialty::None
     }
 }
 
@@ -361,26 +309,19 @@ fn process_number(
 ///
 /// Resulting AccountId in base58 form is added to fancy_out on js card "Id".
 pub(crate) fn special_case_account_id(
-    data: Vec<u8>,
+    data: &mut Vec<u8>,
     indent: u32,
-    short_specs: &ShortSpecs,
-) -> Result<DecodedOut, ParserError> {
+) -> Result<OutputCard, ParserError> {
     match data.get(0..32) {
         Some(a) => {
             let array_decoded: [u8; 32] = a.try_into().expect("constant length, always fits");
-            let remaining_vector = data[32..].to_vec();
+            *data = data[32..].to_vec();
             let account_id = AccountId32::new(array_decoded);
-            let fancy_out = vec![OutputCard {
-                card: ParserCard::Id {
-                    id: account_id,
-                    base58prefix: short_specs.base58prefix,
-                },
+            let out = OutputCard {
+                card: ParserCard::Id(account_id),
                 indent,
-            }];
-            Ok(DecodedOut {
-                remaining_vector,
-                fancy_out,
-            })
+            };
+            Ok(out)
         }
         None => Err(ParserError::Decoding(ParserDecodingError::DataTooShort)),
     }

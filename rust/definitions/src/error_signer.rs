@@ -15,7 +15,6 @@
 //! error management is easier.
 use anyhow::anyhow;
 use sp_core::{crypto::SecretStringError, H256};
-use std::fmt::Write as _;
 use time::error::Format;
 #[cfg(feature = "test")]
 use variant_count::VariantCount;
@@ -304,13 +303,13 @@ impl ErrorSource for Signer {
                         format!("General verifier in the database is {}. Received {} could be accepted only if verified by the same general verifier. Current message is verified by {}.", old_general_verifier_value.show_error(), insert, new_general_verifier_value.show_error())
                     },
                     InputSigner::TypesKnown => String::from("Exactly same types information is already in the database."),
-                    InputSigner::MessageNoWrapper => String::from("Received message has no `<Bytes></Bytes>` wrapper."),
-                    InputSigner::MessageNotValidUtf8 => String::from("Received message could not be represented as valid utf8 sequence."),
+                    InputSigner::MessageNotReadable => String::from("Received message could not be read."),
                     InputSigner::UnknownNetwork{genesis_hash, encryption} => format!("Input generated within unknown network and could not be processed. Add network with genesis hash {} and encryption {}.", hex::encode(genesis_hash), encryption.show()),
                     InputSigner::NoMetadata{name} => format!("Input transaction is generated in network {}. Currently there are no metadata entries for it, and transaction could not be processed. Add network metadata.", name),
                     InputSigner::SpecsKnown{name, encryption} => format!("Exactly same network specs for network {} with encryption {} are already in the database.", name, encryption.show()),
                     InputSigner::AddSpecsVerifierChanged {name, old_verifier_value, new_verifier_value} => format!("Network {} current verifier is {}. Received add_specs message is verified by {}, which is neither current network verifier not the general verifier. Changing the network verifier to another non-general one would require wipe and reset of Signer.", name, old_verifier_value.show_error(), new_verifier_value.show_error()),
                     InputSigner::InvalidDerivation(x) => format!("Derivation {} has invalid format.", x),
+                    InputSigner::OnlyNoPwdDerivations => String::from("Only derivations without passwords are allowed in bulk import."),
                     InputSigner::SeedNameExists(x) => format!("Seed name {} already exists.", x),
                 };
                 format!("Bad input data. {}", insert)
@@ -350,7 +349,7 @@ impl ErrorSource for Signer {
                 let mut insert = String::new();
                 for (i,(version, parser_error)) in errors.iter().enumerate() {
                     if i>0 {insert.push(' ')}
-                    let _ = write!(insert, "Parsing with {}{} metadata: {}", network_name, version, parser_error.show());
+                    insert.push_str(&format!("Parsing with {}{} metadata: {}", network_name, version, parser_error.show()));
                 }
                 format!("Failed to decode extensions. Please try updating metadata for {} network. {}", network_name, insert)
             },
@@ -359,7 +358,6 @@ impl ErrorSource for Signer {
             ErrorSigner::WrongPasswordNewChecksum(_) => String::from("Wrong password."),
             ErrorSigner::NoNetworksAvailable => String::from("No networks available. Please load networks information to proceed."),
             ErrorSigner::TimeFormat(e) => format!("Unable to produce timestamp. {}", e),
-            ErrorSigner::NoKnownSeeds => String::from("There are no seeds. Please create a seed first."),
             ErrorSigner::SeedPhraseEmpty => String::from("Signer expected seed phrase, but the seed phrase is empty. Please report this bug."),
             ErrorSigner::SeedNameEmpty => String::from("Signer expected seed name, but the seed name is empty. Please report this bug."),
         }
@@ -457,10 +455,6 @@ pub enum ErrorSigner {
     /// Time formatting error
     TimeFormat(Format),
 
-    /// Signer has no seeds in storage. User tried an action that needs at least
-    /// one seed.
-    NoKnownSeeds,
-
     /// Signer tried to use empty seed phrase, likely a bug on the interface
     SeedPhraseEmpty,
 
@@ -482,9 +476,9 @@ impl ErrorSigner {
 /// [`InterfaceSigner`] error means that rust backend can not process the
 /// information sent by the frontend.
 ///
-/// Signer rust backend sends data into frontend as [`ActionResult`](crate::navigation::ActionResult)s. Frontend
-/// displays them, and can send back into rust some parts of the data of
-/// the user input.
+/// Signer rust backend sends data into frontend as
+/// [`ActionResult`](crate::navigation::ActionResult)s. Frontend displays them,
+/// and can send back into rust some parts of the data of the user input.
 ///
 /// Data that user can type from keyboard is processed as is, it does not
 /// cause errors on the interface.
@@ -1281,13 +1275,8 @@ pub enum InputSigner {
     TypesKnown,
 
     /// Text message received as a part of signable transaction with `53xx03`
-    /// does not have `<Bytes></Bytes>` wrapper
-    MessageNoWrapper,
-
-    /// Text message received as a part of signable transaction with `53xx03`
-    /// prelude could not be transformed into a valid `String`, because there
-    /// are invalid utf8 symbols.
-    MessageNotValidUtf8,
+    /// prelude could not be transformed into a valid `String`.
+    MessageNotReadable,
 
     /// Received signable transaction (with prelude `53xx00`, `53xx02` or
     /// `53xx03`) is generated in the network that has no corresponding
@@ -1345,6 +1334,9 @@ pub enum InputSigner {
     ///
     /// Associated data is the derivation that could not be used as a `String`.
     InvalidDerivation(String),
+
+    /// Received `derivations` update payload contains a derivation with a password.
+    OnlyNoPwdDerivations,
 
     /// User has tried to create new seed with already existing seed name.
     ///
@@ -1711,7 +1703,7 @@ pub enum ParserDecodingError {
     /// Parser was unable to decode the data piece into a primitive type.
     ///
     /// Associated data is primitive identifier.
-    PrimitiveFailure(String),
+    PrimitiveFailure(&'static str),
 
     /// SCALE-encoded `Option<_>` can have as a first byte:
     ///
@@ -1791,6 +1783,9 @@ pub enum ParserDecodingError {
     /// Parser expects to use all data in decoding. This error appears if some
     /// data from extensions is not used in the decoding.
     SomeDataNotUsedExtensions,
+
+    /// Specialty indicator encountered for unexpected type.
+    SpecialtyNotDescribed,
 }
 
 /// Errors occuring because the network metadata
@@ -1865,6 +1860,7 @@ impl ParserError {
                     ParserDecodingError::Era => String::from("Could not decode Era."),
                     ParserDecodingError::SomeDataNotUsedMethod => String::from("After decoding the method some data remained unused."),
                     ParserDecodingError::SomeDataNotUsedExtensions => String::from("After decoding the extensions some data remained unused."),
+                    ParserDecodingError::SpecialtyNotDescribed => String::from("Specialty not described for type."),
                 }
             },
             ParserError::FundamentallyBadV14Metadata(x) => {
