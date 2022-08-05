@@ -1,22 +1,28 @@
 package io.parity.signer.models
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.common.InputImage
 import io.parity.signer.uniffi.Action
-import io.parity.signer.uniffi.qrparserGetPacketsTotal
-import io.parity.signer.uniffi.qrparserTryDecodeQrSequence
+import io.parity.signer.uniffi.Payload
 
 /**
  * Barcode detecting function.
  * This uses experimental features
  */
+@OptIn(ExperimentalUnsignedTypes::class)
 @SuppressLint("UnsafeOptInUsageError")
-fun SignerDataModel.processFrame(
+fun processFrame(
 	barcodeScanner: BarcodeScanner,
-	imageProxy: ImageProxy
+	imageProxy: ImageProxy,
+	button: (Action, String, String) -> Unit,
+	context: Context,
+	submitFrame: (List<UByte>) -> Payload,
+	refreshFrames: () -> Unit
 ) {
 	if (imageProxy.image == null) return
 	val inputImage = InputImage.fromMediaImage(
@@ -27,60 +33,23 @@ fun SignerDataModel.processFrame(
 	barcodeScanner.process(inputImage)
 		.addOnSuccessListener { barcodes ->
 			barcodes.forEach {
-				val payloadString = it?.rawBytes?.encodeHex()
-				if (!(bucket.contains(payloadString) || payloadString.isNullOrEmpty())) {
-					if (total.value == null) {
-						try {
-							val proposeTotal =
-								qrparserGetPacketsTotal(payloadString, true).toInt()
-							if (proposeTotal == 1) {
-								try {
-									payload = qrparserTryDecodeQrSequence(
-										"[\"$payloadString\"]",
-										true
-									)
-									resetScanValues()
-									pushButton(Action.TRANSACTION_FETCHED, payload)
-								} catch (e: java.lang.Exception) {
-									Log.e("Single frame decode failed", e.toString())
-								}
-							} else {
-								bucket += payloadString
-								_total.value = proposeTotal
-							}
-						} catch (e: java.lang.Exception) {
-							Log.e("QR sequence length estimation", e.toString())
-						}
-					} else {
-						bucket += payloadString
-						if ((bucket.size + 1) >= (total.value ?: 0)) {
-							try {
-								payload = qrparserTryDecodeQrSequence(
-									"[\"" + bucket.joinToString(separator = "\",\"") + "\"]",
-									true
-								)
-								if (payload.isNotEmpty()) {
-									resetScanValues()
-									pushButton(Action.TRANSACTION_FETCHED, payload)
-								}
-							} catch (e: java.lang.Exception) {
-								Log.e("failed to parse sequence", e.toString())
-							}
-						}
-						_captured.value = bucket.size
-						_progress.value = (
-							(
-								captured.value ?: 0
-								).toFloat() / (
-								(
-									total.value
-										?: 1
-									).toFloat()
-								)
-							)
-						Log.d("captured", captured.value.toString())
+				it?.rawBytes?.toUByteArray()?.toList()?.let { payload ->
+					try {
+						submitFrame(payload)
+					} catch (e: io.parity.signer.uniffi.ErrorQr) {
+						Toast.makeText(
+							context,
+							"QR parser error: " + e.message,
+							Toast.LENGTH_SHORT
+						).show()
+						null
 					}
+				}?.payload?.let { payload ->
+					// This is pressed only once, that's checked in rust backend
+					// by sending complete payload only once
+					button(Action.TRANSACTION_FETCHED, payload, "")
 				}
+				refreshFrames()
 			}
 		}
 		.addOnFailureListener {
@@ -89,14 +58,4 @@ fun SignerDataModel.processFrame(
 		.addOnCompleteListener {
 			imageProxy.close()
 		}
-}
-
-/**
- * Clears camera progress
- */
-fun SignerDataModel.resetScanValues() {
-	bucket = arrayOf()
-	_captured.value = null
-	_total.value = null
-	_progress.value = 0.0f
 }

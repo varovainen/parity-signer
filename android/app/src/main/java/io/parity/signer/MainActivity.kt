@@ -57,9 +57,6 @@ fun SignerApp(signerDataModel: SignerDataModel) {
 		val authenticated = signerDataModel.authenticated.observeAsState()
 		val actionResult = signerDataModel.actionResult.observeAsState()
 		val shieldAlert = signerDataModel.alertState.observeAsState()
-		val progress = signerDataModel.progress.observeAsState()
-		val captured = signerDataModel.captured.observeAsState()
-		val total = signerDataModel.total.observeAsState()
 
 		when (onBoardingDone.value) {
 			OnBoardingState.Yes -> {
@@ -112,7 +109,6 @@ fun SignerApp(signerDataModel: SignerDataModel) {
 								signTransaction = signerDataModel::signTransaction,
 								wipeToJailbreak = signerDataModel::wipeToJailbreak,
 								button = signerDataModel::pushButton
-
 							)
 							ModalSelector(
 								modalData = actionResult.value?.modalData,

@@ -1,9 +1,7 @@
 package io.parity.signer.screens
 
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
+import android.widget.Toast
+import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.BorderStroke
@@ -13,10 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.State
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -26,12 +21,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import io.parity.signer.components.ScanProgressBar
+import io.parity.signer.models.processFrame
 import io.parity.signer.ui.theme.Crypto400
 import io.parity.signer.uniffi.Action
+import io.parity.signer.uniffi.Collection
+import io.parity.signer.uniffi.Frames
 
 @Composable
 fun KeepScreenOn() {
@@ -49,28 +46,17 @@ fun KeepScreenOn() {
  */
 @Composable
 fun ScanScreen(
-	progress: State<Float?>,
-	captured: State<Int?>,
-	total: State<Int?>,
 	button: (Action, String, String) -> Unit,
 	handleCameraPermissions: () -> Unit,
-	processFrame: (
-		barcodeScanner: BarcodeScanner,
-		imageProxy: ImageProxy
-	) -> Unit,
-	resetScanValues: () -> Unit,
 ) {
+	var collection = remember { Collection() }
+	val frames: MutableState<Frames?> = remember { mutableStateOf(null)}
 	val lifecycleOwner = LocalLifecycleOwner.current
 	val context = LocalContext.current
 	val cameraProviderFuture =
 		remember { ProcessCameraProvider.getInstance(context) }
 
-	val resetScan: () -> Unit = {
-		resetScanValues()
-		button(Action.GO_BACK, "", "")
-	}
-
-	if ((captured.value ?: 0) > 0) {
+	if (frames.value != null) {
 		KeepScreenOn()
 	}
 
@@ -89,6 +75,10 @@ fun ScanScreen(
 					val previewView = PreviewView(context)
 					// mlkit docs: The default option is not recommended because it tries
 					// to scan all barcode formats, which is slow.
+					//
+					// In fact, it is not slow at all, no measurable difference was
+					// observed, but this avoids extra barcodes being accidentally scanned
+					// during multiframes.
 					val options = BarcodeScannerOptions.Builder()
 						.setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
 
@@ -115,7 +105,23 @@ fun ScanScreen(
 							.build()
 							.apply {
 								setAnalyzer(executor) { imageProxy ->
-									processFrame(barcodeScanner, imageProxy)
+									processFrame(
+										barcodeScanner,
+										imageProxy,
+										button,
+										context,
+										collection::processFrame
+									) {
+										try {
+											frames.value = collection.frames()
+										} catch (e: io.parity.signer.uniffi.ErrorQr) {
+											Toast.makeText(
+												context,
+												"QR scanner error: " + e.message,
+												Toast.LENGTH_LONG
+											).show()
+										}
+									}
 								}
 							}
 
@@ -138,15 +144,26 @@ fun ScanScreen(
 					.clip(RoundedCornerShape(8.dp))
 			)
 		}
+
 		Column(
 			verticalArrangement = Arrangement.Bottom,
 			modifier = Modifier.fillMaxSize()
 		) {
 			ScanProgressBar(
-				progress = progress,
-				captured = captured,
-				total = total,
-				resetScan = resetScan
+				frames = frames,
+				resetScan = {
+					try {
+						collection.clean()
+						frames.value = collection.frames()
+					} catch (e: io.parity.signer.uniffi.ErrorQr) {
+						Toast
+							.makeText(
+								context,
+								"QR scanner reset error: " + e.message,
+								Toast.LENGTH_LONG
+							).show()
+					}
+				}
 			)
 		}
 	}
