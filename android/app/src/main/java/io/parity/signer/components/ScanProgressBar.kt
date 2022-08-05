@@ -19,17 +19,16 @@ import io.parity.signer.ui.theme.Bg000
 import io.parity.signer.ui.theme.Text400
 import io.parity.signer.ui.theme.Text600
 import io.parity.signer.ui.theme.modal
+import io.parity.signer.uniffi.Frames
 
 @Composable
 fun ScanProgressBar(
-	progress: State<Float?>,
-	captured: State<Int?>,
-	total: State<Int?>,
+	frames: State<Frames?>,
 	resetScan: () -> Unit
 ) {
 	val frontColor = MaterialTheme.colors.onSecondary
 
-	if (progress.value != 0f) {
+	frames.value?.let {
 		Surface(
 			color = MaterialTheme.colors.Bg000,
 			shape = MaterialTheme.shapes.modal
@@ -53,13 +52,14 @@ fun ScanProgressBar(
 						frontColor,
 						Offset.Zero.copy(x = 0.dp.toPx(), y = 8.dp.toPx()),
 						Size(
-							width = this.size.width * (progress.value ?: 0f),
+							//total is never zero
+							width = this.size.width * it.current.toFloat().div(it.total.toFloat()),
 							height = 8.dp.toPx()
 						)
 					)
 				}
 				Text(
-					"From " + captured.value + " / " + total.value + " captured frames",
+					"From " + it.current + " / " + it.total + " captured frames",
 					style = MaterialTheme.typography.subtitle1,
 					color = MaterialTheme.colors.Text600
 				)
