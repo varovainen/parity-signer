@@ -19,9 +19,7 @@ import androidx.compose.ui.unit.dp
 import io.parity.signer.components.BigButton
 import io.parity.signer.components.BottomBar
 import io.parity.signer.components.TopBar
-import io.parity.signer.models.AlertState
-import io.parity.signer.models.SignerDataModel
-import io.parity.signer.models.pushButton
+import io.parity.signer.models.*
 import io.parity.signer.screens.LandingView
 import io.parity.signer.screens.WaitingScreen
 import io.parity.signer.ui.theme.ParitySignerTheme
@@ -31,10 +29,6 @@ import io.parity.signer.uniffi.*
 @ExperimentalMaterialApi
 @ExperimentalAnimationApi
 class MainActivity : AppCompatActivity() {
-	init {
-		initLogging("SIGNER_RUST_LOG")
-	}
-
 	// rust library is initialized inside data model
 	private val signerDataModel by viewModels<SignerDataModel>()
 
@@ -97,14 +91,34 @@ fun SignerApp(signerDataModel: SignerDataModel) {
 								screenData = actionResult.value?.screenData
 									?: ScreenData.Documents,//default fallback
 								alertState = shieldAlert,
-								button = signerDataModel::pushButton,
-								signerDataModel = signerDataModel
+								progress = progress,
+								captured = captured,
+								total = total,
+								seedNames = signerDataModel.seedNames.value ?: emptyArray(),
+								isStrongBoxProtected = signerDataModel::isStrongBoxProtected,
+								addKey = signerDataModel::addKey,
+								checkPath = signerDataModel::checkPath,
+								increment = signerDataModel::increment,
+								addSeed = signerDataModel::addSeed,
+								handleCameraPermissions = signerDataModel::handleCameraPermissions,
+								processFrame = signerDataModel::processFrame,
+								resetScanValues = signerDataModel::resetScanValues,
+								getAppVersion = signerDataModel::getAppVersion,
+								wipeToFactory = signerDataModel::wipeToFactory,
+								signSufficientCrypto = signerDataModel::signSufficientCrypto,
+								signTransaction = signerDataModel::signTransaction,
+								wipeToJailbreak = signerDataModel::wipeToJailbreak,
+								button = signerDataModel::pushButton
 							)
 							ModalSelector(
 								modalData = actionResult.value?.modalData,
 								alertState = shieldAlert,
-								button = signerDataModel::pushButton,
-								signerDataModel = signerDataModel,
+								removeSeed = signerDataModel::removeSeed,
+								getSeedForBackup = signerDataModel::getSeedForBackup,
+								addKey = signerDataModel::addKey,
+								addSeed = signerDataModel::addSeed,
+								selectSeed = signerDataModel::selectSeed,
+								button = signerDataModel::pushButton
 							)
 							AlertSelector(
 								alert = actionResult.value?.alertData,
