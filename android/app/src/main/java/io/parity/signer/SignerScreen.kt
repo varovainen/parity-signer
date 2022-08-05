@@ -123,6 +123,10 @@ fun ScreenSelector(
 			screenData.f,
 			wipeToJailbreak
 		)
+		is ScreenData.SignatureReady -> SignatureReady(
+			screenData.f,
+			button
+		)
 	}
 }
 
@@ -163,10 +167,6 @@ fun ModalSelector(
 		is ModalData.PasswordConfirm -> PasswordConfirm(
 			modalData.f,
 			addKey = addKey
-		)
-		is ModalData.SignatureReady -> SignatureReady(
-			modalData.f,
-			button1
 		)
 		is ModalData.EnterPassword -> EnterPassword(
 			modalData.f,

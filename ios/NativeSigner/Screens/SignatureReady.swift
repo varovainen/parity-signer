@@ -8,40 +8,35 @@
 import SwiftUI
 
 struct SignatureReady: View {
-    @GestureState private var dragOffset = CGSize.zero
-    @State var offset: CGFloat = 0
-    @State var oldOffset: CGFloat = UIScreen.main.bounds.size.width
     var content: MSignatureReady
     let pushButton: (Action, String, String) -> Void
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8).foregroundColor(Color("Bg000"))
-            VStack {
+        ScrollViewReader { scrollView in
+            ScrollView {
+                TransactionBlock(cards: content.content.assemble())
+                AddressCard(address: content.authorInfo)
+                NetworkCard(title: content.networkInfo.networkTitle, logo: content.networkInfo.networkLogo)
+                HStack {
+                    Text("LOG NOTE").font(FBase(style: .overline)).foregroundColor(Color("Text400"))
+                    Spacer()
+                }
+                Text(content.userComment)
                 HeaderBar(line1: "Your Signature", line2: "Scan it into your application")
+                    .id("signqture QR")
                 Image(uiImage: UIImage(data: Data(content.signature)) ?? UIImage())
                     .resizable()
-                    .aspectRatio(contentMode: .fit).padding(12)
+                    .aspectRatio(contentMode: .fit)
+                    .padding(12)
                 Spacer()
                 BigButton(text: "Done", action: {
                     pushButton(.goBack, "", "")
                 })
-            }.padding(16)
+            }
+            .onAppear{
+                scrollView.scrollTo("signqture QR", anchor: .top)
+            }
+            .padding(16)
         }
-        .offset(x: 0, y: offset+oldOffset)
-        .gesture(
-            DragGesture()
-                .onChanged {drag in
-                    self.offset = drag.translation.height
-                }
-                .onEnded {drag in
-                    self.oldOffset += drag.translation.height
-                    self.offset = 0
-                }
-        )
-        .gesture(
-            TapGesture().onEnded {_ in
-                self.oldOffset = 0
-            })
     }
 }
 
