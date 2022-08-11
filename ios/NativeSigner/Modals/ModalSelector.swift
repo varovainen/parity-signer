@@ -17,9 +17,9 @@ struct ModalSelector: View {
     let createAddress: (String, String) -> Void
     let getSeedForBackup: (String) -> String
     let sign: (String, String) -> Void
-    
+
     var body: some View {
-        switch (modalData) {
+        switch modalData {
         case .newSeedMenu:
             NewSeedMenu(
                 alert: alert,
@@ -47,9 +47,6 @@ struct ModalSelector: View {
         case .passwordConfirm(let value):
             PasswordConfirm(content: value,
                             createAddress: createAddress)
-        case .signatureReady(let value):
-            SignatureReady(content: value,
-                           pushButton: pushButton)
         case .enterPassword(let value):
             EnterPassword(content: value,
                           pushButton: pushButton)
