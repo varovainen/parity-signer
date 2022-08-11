@@ -1139,7 +1139,7 @@ fn ugly_patch_u64<O: BitOrder>(into_bv_decode: Vec<u8>) -> Result<String, Parser
         }
         let print1 = BitVec::<u32, O>::from_vec(vec![vec[2 * i]]).to_string();
         let print2 = BitVec::<u32, O>::from_vec(vec![vec[2 * i + 1]]).to_string();
-        write!(
+        let _ = write!(
             out,
             "{}{}",
             &print1[1..print1.len() - 1],
